@@ -59,6 +59,22 @@
             "newArchEnabled": false
           }
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O app usa a câmera para fotos e vídeos da avaliação técnica.",
+          "microphonePermission": "O app grava áudio nos vídeos da avaliação.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "O app precisa de acesso à galeria para guardar as evidências.",
+          "savePhotosPermission": "O app guarda fotos e vídeos da avaliação na sua galeria.",
+          "isAccessMediaLocationEnabled": false
+        }
       ]
     ],
     "scheme": "pint-avaliacao-ar"

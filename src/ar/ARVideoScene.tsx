@@ -1,11 +1,9 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { ViroARScene, ViroARSceneNavigator, ViroText } from '@reactvision/react-viro';
+import React, { useCallback, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal } from 'react-native';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { COPY } from '../constants';
-
-const TRACKING_NORMAL = 2;
-const TRACKING_LIMITED = 1;
-
+import { persistCapturedVideo } from '../utils/persistCapture';
+import { saveCaptureToDeviceGallery } from '../utils/saveToGallery';
 
 export interface ARVideoScreenProps {
   label: string;
@@ -13,77 +11,66 @@ export interface ARVideoScreenProps {
   onBack: () => void;
 }
 
-type SceneNavigator = {
-  startVideoRecording: (name: string, saveToRoll: boolean, onError?: (code: number) => void) => void;
-  stopVideoRecording: () => Promise<{ success: boolean; url?: string }>;
-  viroAppProps?: { onTrackingStateChange?: (s: string) => void };
-};
-
-const arVideoNavigatorRef = { current: null as SceneNavigator | null };
-
-class ARVideoSceneInner extends React.Component<{ sceneNavigator: SceneNavigator }> {
-  componentDidMount() {
-    arVideoNavigatorRef.current = this.props.sceneNavigator;
-  }
-
-  render() {
-    const { sceneNavigator } = this.props;
-    const viro = sceneNavigator?.viroAppProps ?? {};
-    const onTrackingStateChange = viro.onTrackingStateChange as ((s: string) => void) | undefined;
-
-    return (
-      <ViroARScene
-        anchorDetectionTypes={['PlanesHorizontal', 'PlanesVertical']}
-        onTrackingUpdated={(state: number) => {
-          const text =
-            state === TRACKING_NORMAL
-              ? COPY.ar.tracking.normal
-              : state === TRACKING_LIMITED
-                ? COPY.ar.tracking.limited
-                : COPY.ar.tracking.unavailable;
-          onTrackingStateChange?.(text);
-        }}
-      >
-        <ViroText text={COPY.ar.video.hint} position={[0, 0.2, -0.6]} style={styles.arText} />
-      </ViroARScene>
-    );
-  }
-}
-
-// Keep a stable initialScene; `scene` must be a component (not a React element/object).
-const INITIAL_SCENE = {
-  scene: (props: { sceneNavigator: SceneNavigator }) => <ARVideoSceneInner {...props} />,
-};
+const MAX_VIDEO_SECONDS = 180;
 
 export function ARVideoScreen({ label, onVideo, onBack }: ARVideoScreenProps) {
-  const [overlay, setOverlay] = useState<'instructions' | 'ar'>('instructions');
-  const [trackingState, setTrackingState] = useState(COPY.ar.tracking.unavailable);
+  const [overlay, setOverlay] = useState<'instructions' | 'camera'>('instructions');
+  const [camPermission, requestCam] = useCameraPermissions();
+  const [micPermission, requestMic] = useMicrophonePermissions();
+  const [cameraReady, setCameraReady] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [startTime, setStartTime] = useState(0);
+  const cameraRef = useRef<InstanceType<typeof CameraView>>(null);
+
+  const openCamera = useCallback(async () => {
+    if (!camPermission?.granted) {
+      const c = await requestCam();
+      if (!c.granted) {
+        Alert.alert('Permissão', COPY.errors.camera);
+        return;
+      }
+    }
+    if (!micPermission?.granted) {
+      const m = await requestMic();
+      if (!m.granted) {
+        Alert.alert('Permissão', COPY.errors.recording);
+        return;
+      }
+    }
+    setOverlay('camera');
+  }, [camPermission?.granted, micPermission?.granted, requestCam, requestMic]);
 
   const handleStart = () => {
-    const nav = arVideoNavigatorRef.current;
-    if (!nav?.startVideoRecording || recording) return;
-    nav.startVideoRecording(`video_${Date.now()}`, false, () => {
-      setRecording(false);
-    });
-    setStartTime(Date.now());
+    const cam = cameraRef.current;
+    if (!cam || recording || !cameraReady) return;
+
+    const startedAt = Date.now();
     setRecording(true);
+
+    cam
+      .recordAsync({ maxDuration: MAX_VIDEO_SECONDS })
+      .then(async (video) => {
+        setRecording(false);
+        if (!video?.uri) return;
+        const durationSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+        try {
+          await saveCaptureToDeviceGallery(video.uri);
+        } catch {
+          // continua com cópia na app
+        }
+        try {
+          const storedUri = await persistCapturedVideo(video.uri);
+          onVideo(storedUri, durationSeconds);
+        } catch {
+          onVideo(video.uri, durationSeconds);
+        }
+      })
+      .catch(() => {
+        setRecording(false);
+      });
   };
 
-  const handleStop = async () => {
-    const nav = arVideoNavigatorRef.current;
-    if (!nav?.stopVideoRecording || !recording) return;
-
-    try {
-      const result = await nav.stopVideoRecording();
-      if (result?.success && result?.url) {
-        const durationSeconds = Math.round((Date.now() - startTime) / 1000);
-        onVideo(result.url, durationSeconds);
-      }
-    } finally {
-      setRecording(false);
-    }
+  const handleStop = () => {
+    cameraRef.current?.stopRecording();
   };
 
   if (overlay === 'instructions') {
@@ -92,8 +79,25 @@ export function ARVideoScreen({ label, onVideo, onBack }: ARVideoScreenProps) {
         <View style={styles.overlay}>
           <Text style={styles.title}>{COPY.ar.video.title}</Text>
           <Text style={styles.hint}>{COPY.ar.video.hint}</Text>
-          <TouchableOpacity style={styles.btn} onPress={() => setOverlay('ar')}>
-            <Text style={styles.btnText}>Abrir câmera AR</Text>
+          <Text style={styles.labelTag}>{label}</Text>
+          <TouchableOpacity style={styles.btn} onPress={openCamera}>
+            <Text style={styles.btnText}>Abrir câmera</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backBtnText}>Voltar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (!camPermission?.granted || !micPermission?.granted) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.overlay}>
+          <Text style={styles.hint}>{COPY.errors.recording}</Text>
+          <TouchableOpacity style={styles.btn} onPress={openCamera}>
+            <Text style={styles.btnText}>Permitir câmera e microfone</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.backBtn} onPress={onBack}>
             <Text style={styles.backBtnText}>Voltar</Text>
@@ -104,30 +108,39 @@ export function ARVideoScreen({ label, onVideo, onBack }: ARVideoScreenProps) {
   }
 
   return (
-    <View style={StyleSheet.absoluteFill}>
-      <ViroARSceneNavigator
-        autofocus
-        initialScene={INITIAL_SCENE}
-        viroAppProps={{ label, onVideo, onBack, onTrackingStateChange: setTrackingState }}
-        style={styles.viro}
+    <View style={StyleSheet.absoluteFill} collapsable={false}>
+      <CameraView
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        facing="back"
+        mode="video"
+        onCameraReady={() => setCameraReady(true)}
       />
-      <View style={styles.uiOverlay} pointerEvents="box-none">
-        <Text style={styles.trackingText}>{trackingState}</Text>
-        {!recording ? (
-          <TouchableOpacity style={styles.recordBtn} onPress={handleStart}>
-            <Text style={styles.recordBtnText}>{COPY.ar.video.start}</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.stopBtn} onPress={handleStop}>
-            <Text style={styles.stopBtnText}>{COPY.ar.video.stop}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      <View style={styles.topOverlay} pointerEvents="box-none">
-        <TouchableOpacity style={styles.closeBtn} onPress={onBack}>
-          <Text style={styles.closeBtnText}>✕ Voltar</Text>
-        </TouchableOpacity>
-      </View>
+      <Modal transparent animationType="none" statusBarTranslucent visible>
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          <View style={styles.uiOverlay} pointerEvents="box-none">
+            <Text style={styles.cameraHintText}>{COPY.ar.video.hint}</Text>
+            {!recording ? (
+              <TouchableOpacity
+                style={[styles.recordBtn, !cameraReady && styles.btnDisabled]}
+                onPress={handleStart}
+                disabled={!cameraReady}
+              >
+                <Text style={styles.recordBtnText}>{COPY.ar.video.start}</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.stopBtn} onPress={handleStop}>
+                <Text style={styles.stopBtnText}>{COPY.ar.video.stop}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <View style={styles.topOverlay} pointerEvents="box-none">
+            <TouchableOpacity style={styles.closeBtn} onPress={onBack}>
+              <Text style={styles.closeBtnText}>✕ Voltar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -136,19 +149,30 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
   overlay: { flex: 1, justifyContent: 'center', padding: 24 },
   title: { fontSize: 22, fontWeight: '700', color: '#f8fafc', marginBottom: 12 },
-  hint: { fontSize: 15, color: '#94a3b8', marginBottom: 24 },
+  hint: { fontSize: 15, color: '#94a3b8', marginBottom: 12 },
+  labelTag: { fontSize: 13, color: '#64748b', marginBottom: 24 },
   btn: { backgroundColor: '#38bdf8', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   btnText: { fontSize: 16, fontWeight: '600', color: '#0f172a' },
   backBtn: { marginTop: 16, alignItems: 'center' },
   backBtnText: { color: '#94a3b8', fontSize: 15 },
-  viro: { flex: 1 },
+  btnDisabled: { opacity: 0.6 },
   uiOverlay: {
     position: 'absolute',
     bottom: 40,
     left: 24,
     right: 24,
   },
-  trackingText: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginBottom: 12 },
+  cameraHintText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '500',
+    color: '#f8fafc',
+    textAlign: 'center',
+    marginBottom: 10,
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   recordBtn: { backgroundColor: '#ef4444', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   recordBtnText: { fontSize: 16, fontWeight: '600', color: '#fff' },
   stopBtn: { backgroundColor: '#64748b', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
@@ -156,5 +180,4 @@ const styles = StyleSheet.create({
   topOverlay: { position: 'absolute', top: 0, left: 0, right: 0 },
   closeBtn: { position: 'absolute', top: 50, right: 24, padding: 12, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 10 },
   closeBtnText: { color: '#fff', fontSize: 15 },
-  arText: { fontFamily: 'Arial', fontSize: 18, color: '#ffffff' },
 });

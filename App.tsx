@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CollectionProvider, useCollection } from './src/context/CollectionContext';
+import { ClientInfoScreen } from './src/screens/ClientInfoScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { ChecklistScreen } from './src/screens/ChecklistScreen';
 import { SummaryScreen } from './src/screens/SummaryScreen';
@@ -11,6 +12,7 @@ import { ARVideoScreen } from './src/ar/ARVideoScene';
 import type { ChecklistItemId } from './src/types';
 
 export type RootStackParamList = {
+  ClientInfo: undefined;
   Welcome: undefined;
   Checklist: undefined;
   Summary: undefined;
@@ -22,15 +24,18 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function AppNavigator() {
-  const { addMeasure, addPhoto, addVideo, toggleChecklist, setStep } = useCollection();
+  const { state, addMeasure, addPhoto, addVideo, completeChecklist, setStep } = useCollection();
 
-  const maxSteps = 7;
+  const maxSteps = 4;
   React.useEffect(() => {
-    setStep(1, maxSteps);
-  }, []);
+    if (!state.clientInfo) {
+      setStep(1, maxSteps);
+    }
+  }, [maxSteps, setStep, state.clientInfo]);
 
   return (
     <Stack.Navigator
+      initialRouteName={state.clientInfo ? 'Welcome' : 'ClientInfo'}
       screenOptions={{
         headerStyle: { backgroundColor: '#0f172a' },
         headerTintColor: '#f8fafc',
@@ -38,6 +43,11 @@ function AppNavigator() {
         contentStyle: { backgroundColor: '#0f172a' },
       }}
     >
+      <Stack.Screen
+        name="ClientInfo"
+        component={ClientInfoScreen}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen
         name="Welcome"
         component={WelcomeScreen}
@@ -60,11 +70,12 @@ function AppNavigator() {
             onConfirm={(valueMeters) => {
               addMeasure({
                 id: `m_${Date.now()}`,
+                itemId: route.params.itemId as ChecklistItemId,
                 label: route.params.label,
                 valueMeters,
                 timestamp: Date.now(),
               });
-              toggleChecklist(route.params.itemId as ChecklistItemId);
+              completeChecklist(route.params.itemId as ChecklistItemId);
               navigation.goBack();
             }}
             onBack={() => navigation.goBack()}
@@ -78,11 +89,12 @@ function AppNavigator() {
             onPhoto={(uri) => {
               addPhoto({
                 id: `p_${Date.now()}`,
+                itemId: route.params.itemId as ChecklistItemId,
                 label: route.params.label,
                 uri,
                 timestamp: Date.now(),
               });
-              toggleChecklist(route.params.itemId as ChecklistItemId);
+              completeChecklist(route.params.itemId as ChecklistItemId);
               navigation.goBack();
             }}
             onBack={() => navigation.goBack()}
@@ -96,12 +108,13 @@ function AppNavigator() {
             onVideo={(uri, durationSeconds) => {
               addVideo({
                 id: `v_${Date.now()}`,
+                itemId: route.params.itemId as ChecklistItemId,
                 label: route.params.label,
                 uri,
                 durationSeconds,
                 timestamp: Date.now(),
               });
-              toggleChecklist(route.params.itemId as ChecklistItemId);
+              completeChecklist(route.params.itemId as ChecklistItemId);
               navigation.goBack();
             }}
             onBack={() => navigation.goBack()}

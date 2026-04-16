@@ -6,7 +6,23 @@ export const POINTS = {
   COMPLETE_STEP: 10,
 } as const;
 
+export const EVIDENCE_POINTS = {
+  measure: POINTS.MEASURE,
+  photo: POINTS.PHOTO,
+  video: POINTS.VIDEO,
+  none: 0,
+} as const;
+
 export const COPY = {
+  client: {
+    title: 'Dados do cliente',
+    subtitle: 'Preencha as informações abaixo antes de iniciar a avaliação técnica.',
+    fullName: 'Nome completo',
+    phone: 'Telefone',
+    email: 'E-mail',
+    address: 'Endereço da instalação',
+    cta: 'Salvar e continuar',
+  },
   welcome: {
     title: 'Avaliação técnica da sua instalação',
     subtitle: 'Vamos guiá-lo com Realidade Aumentada para coletar as informações que nossa equipe precisa — sem necessidade de visita presencial.',
@@ -21,12 +37,15 @@ export const COPY = {
   },
   ar: {
     measure: {
-      title: 'Medir espaço',
-      hint: 'Toque em dois pontos no chão ou parede para medir a distância.',
-      placeholder: 'Toque para colocar o primeiro ponto...',
-      result: 'Distância: {value} m',
-      confirm: 'Usar esta medida',
-      retry: 'Medir de novo',
+      title: 'Medir distância (AR)',
+      hint: 'Aponte a câmera para o chão ou parede até o rastreamento estabilizar. Toque na tela em cima de cada ponto a medir.',
+      placeholder: '1/2 — Toque no 1º ponto',
+      secondPoint: '2/2 — Toque no 2º ponto',
+      result: '{value} m',
+      confirm: 'Guardar medida',
+      retry: 'Recomeçar',
+      noHit:
+        'Sem superfície detectada aí. Mova o telefone e toque em outro ponto da imagem.',
     },
     photo: {
       title: 'Registrar foto',
@@ -58,5 +77,6 @@ export const COPY = {
     camera: 'Não foi possível acessar a câmera. Verifique as permissões.',
     save: 'Erro ao salvar. Tente novamente.',
     recording: 'Erro na gravação. Verifique permissões de microfone e armazenamento.',
+    requiredFields: 'Preencha todos os campos para continuar.',
   },
 } as const;

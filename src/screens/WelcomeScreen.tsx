@@ -14,9 +14,14 @@ import { ProgressBar } from '../components/ProgressBar';
 import { COPY } from '../constants';
 
 export function WelcomeScreen() {
-  const { state } = useCollection();
+  const { state, setStep } = useCollection();
   const navigation = useNavigation<any>();
   const { width } = useWindowDimensions();
+
+  React.useEffect(() => {
+    setStep(2, 4);
+  }, [setStep]);
+
   const progress = state.maxSteps > 0 ? state.currentStep / state.maxSteps : 0;
 
   return (
@@ -30,6 +35,9 @@ export function WelcomeScreen() {
         </View>
         <Text style={styles.title}>{COPY.welcome.title}</Text>
         <Text style={styles.subtitle}>{COPY.welcome.subtitle}</Text>
+        {state.clientInfo ? (
+          <Text style={styles.clientName}>Cliente: {state.clientInfo.fullName}</Text>
+        ) : null}
         <View style={styles.tip}>
           <Text style={styles.tipText}>{COPY.welcome.tip}</Text>
         </View>
@@ -59,6 +67,7 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 13, color: '#38bdf8', fontWeight: '500' },
   title: { fontSize: 28, fontWeight: '700', color: '#f8fafc', marginBottom: 12 },
   subtitle: { fontSize: 16, color: '#cbd5e1', lineHeight: 24, marginBottom: 24 },
+  clientName: { fontSize: 14, color: '#38bdf8', marginBottom: 20, fontWeight: '600' },
   tip: {
     backgroundColor: 'rgba(51, 65, 85, 0.6)',
     padding: 16,

@@ -36,6 +36,10 @@ allprojects {
 
         google()
         mavenCentral()
+        maven {
+            // expo-camera bundles a local copy of com.google.android:cameraview:1.0.0
+            url("$rootDir/../node_modules/expo-camera/android/maven")
+        }
         maven { url 'https://www.jitpack.io' }
     }
 }

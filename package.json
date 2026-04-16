@@ -10,10 +10,14 @@
     "prebuild": "expo prebuild"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "1.23.1",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/native-stack": "^6.9.17",
     "@reactvision/react-viro": "2.41.3",
     "expo": "~51.0.0",
+    "expo-camera": "~15.0.16",
+    "expo-file-system": "~17.0.1",
+    "expo-media-library": "~16.0.5",
     "expo-status-bar": "~1.12.1",
     "react": "18.2.0",
     "react-native": "0.74.5",
@@ -23,8 +27,9 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
+    "@react-native-community/cli": "latest",
     "@types/react": "~18.2.45",
-    "expo-build-properties": "^1.0.10",
+    "expo-build-properties": "~0.12.5",
     "typescript": "~5.3.0"
   },
   "private": true

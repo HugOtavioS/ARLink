@@ -15,6 +15,7 @@ export interface ChecklistItem {
 
 export interface MeasureEvidence {
   id: string;
+  itemId?: ChecklistItemId;
   label: string;
   valueMeters: number;
   timestamp: number;
@@ -22,6 +23,7 @@ export interface MeasureEvidence {
 
 export interface PhotoEvidence {
   id: string;
+  itemId?: ChecklistItemId;
   label: string;
   uri: string;
   timestamp: number;
@@ -29,13 +31,22 @@ export interface PhotoEvidence {
 
 export interface VideoEvidence {
   id: string;
+  itemId?: ChecklistItemId;
   label: string;
   uri: string;
   durationSeconds: number;
   timestamp: number;
 }
 
+export interface ClientInfo {
+  fullName: string;
+  phone: string;
+  email: string;
+  address: string;
+}
+
 export interface CollectionState {
+  clientInfo: ClientInfo | null;
   checklist: ChecklistItem[];
   measures: MeasureEvidence[];
   photos: PhotoEvidence[];

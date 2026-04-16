@@ -5,18 +5,27 @@ import { useNavigation } from '@react-navigation/native';
 import { useCollection } from '../context/CollectionContext';
 import { ProgressBar } from '../components/ProgressBar';
 import { Card } from '../components/Card';
-import { COPY } from '../constants';
+import { COPY, EVIDENCE_POINTS, POINTS } from '../constants';
 import { ChecklistItem as ChecklistItemType } from '../types';
 
 export function ChecklistScreen() {
-  const { state, toggleChecklist, setStep } = useCollection();
+  const { state, setStep } = useCollection();
   const navigation = useNavigation<any>();
   const { width } = useWindowDimensions();
   const progress = state.maxSteps > 0 ? state.currentStep / state.maxSteps : 0;
-  const maxSteps = 7;
+  const maxSteps = 4;
+  const canContinue = state.checklist.every((item) => item.done);
+  const maxPoints =
+    state.checklist.length * POINTS.CHECKLIST_ITEM +
+    state.checklist.reduce((sum, item) => sum + EVIDENCE_POINTS[item.evidence ?? 'none'], 0);
+  const pointsProgress = maxPoints > 0 ? state.totalPoints / maxPoints : 0;
+
+  React.useEffect(() => {
+    setStep(3, maxSteps);
+  }, [maxSteps, setStep]);
 
   const onNext = () => {
-    setStep(3, maxSteps);
+    setStep(4, maxSteps);
     navigation.navigate('Summary');
   };
 
@@ -34,9 +43,10 @@ export function ChecklistScreen() {
       >
         <Text style={styles.title}>{COPY.checklist.title}</Text>
         <Text style={styles.subtitle}>{COPY.checklist.subtitle}</Text>
-        <ProgressBar progress={progress} style={styles.progress} />
+        {/* <ProgressBar progress={progress} style={styles.progress} /> */}
         <View style={styles.points}>
-          <Text style={styles.pointsText}>🏆 {state.totalPoints} pontos</Text>
+          <Text style={styles.pointsText}>🏆 {state.totalPoints} de {maxPoints} pontos</Text>
+          <ProgressBar progress={pointsProgress} style={styles.pointsProgress} height={6} />
         </View>
         {state.checklist.map((item) => (
           <Card
@@ -46,28 +56,33 @@ export function ChecklistScreen() {
             right={
               <TouchableOpacity
                 style={[styles.checkbox, item.done && styles.checkboxDone]}
-                onPress={() => toggleChecklist(item.id)}
+                disabled
               >
                 {item.done ? <Text style={styles.checkMark}>✓</Text> : null}
               </TouchableOpacity>
             }
           >
-            {!item.done && item.evidence && item.evidence !== 'none' && (
+            {item.evidence && item.evidence !== 'none' && (
               <TouchableOpacity
                 style={styles.arButton}
                 onPress={() => onStartAR(item)}
                 activeOpacity={0.8}
               >
                 <Text style={styles.arButtonText}>
-                  {item.evidence === 'measure' && '📐 Medir com AR'}
-                  {item.evidence === 'photo' && '📷 Registrar foto'}
-                  {item.evidence === 'video' && '🎬 Gravar vídeo'}
+                  {item.evidence === 'measure' && (item.done ? '📐 Reenviar medição' : '📐 Medir com AR')}
+                  {item.evidence === 'photo' && (item.done ? '📷 Reenviar foto' : '📷 Registrar foto')}
+                  {item.evidence === 'video' && (item.done ? '🎬 Reenviar vídeo' : '🎬 Gravar vídeo')}
                 </Text>
               </TouchableOpacity>
             )}
           </Card>
         ))}
-        <TouchableOpacity style={styles.cta} onPress={onNext} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={[styles.cta, !canContinue && styles.ctaDisabled]}
+          onPress={onNext}
+          activeOpacity={0.85}
+          disabled={!canContinue}
+        >
           <Text style={styles.ctaText}>{COPY.checklist.next}</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -83,6 +98,7 @@ const styles = StyleSheet.create({
   progress: { marginBottom: 16 },
   points: { marginBottom: 20 },
   pointsText: { fontSize: 15, color: '#38bdf8', fontWeight: '600' },
+  pointsProgress: { marginTop: 10 },
   checkbox: {
     width: 26,
     height: 26,
@@ -110,5 +126,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 16,
   },
+  ctaDisabled: { opacity: 0.6 },
   ctaText: { fontSize: 17, fontWeight: '600', color: '#0f172a' },
 });
