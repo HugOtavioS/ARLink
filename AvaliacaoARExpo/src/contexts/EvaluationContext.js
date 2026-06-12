@@ -5,6 +5,7 @@ export const EvaluationContext = createContext({});
 
 const INITIAL_STATE = {
   customer: {
+    protocolo: '',
     nome: '',
     cpf: '',
     telefone: '',

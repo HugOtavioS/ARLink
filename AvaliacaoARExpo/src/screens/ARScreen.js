@@ -7,7 +7,9 @@ import { COLORS } from '../config/colors';
 const { width, height } = Dimensions.get('window');
 
 ViroMaterials.createMaterials({
-  modemMaterial: { diffuseColor: '#2BB4D6', lightingModel: 'Blinn' },
+  routerBody: { diffuseColor: '#1e293b', lightingModel: 'Blinn' },
+  routerAntenna: { diffuseColor: '#0f172a', lightingModel: 'Blinn' },
+  routerLed: { diffuseColor: '#4ade80', lightingModel: 'Constant' },
   shadowMaterial: { diffuseColor: '#000000', lightingModel: 'Constant' },
   measureLine: { diffuseColor: '#38bdf8', lightingModel: 'Constant' },
   measureMarker: { diffuseColor: '#f472b6', lightingModel: 'PBR', metalness: 0.2, roughness: 0.4 },
@@ -104,8 +106,20 @@ const ARSceneComponent = () => {
 
       {isCuboMode && cubePos && (
         <ViroNode position={cubePos} dragType="FixedToWorld" onDrag={() => {}}>
-          <ViroBox position={[0, 0.1, 0]} scale={[0.2, 0.2, 0.05]} materials={["modemMaterial"]} />
-          <ViroQuad position={[0, 0.01, 0]} rotation={[-90, 0, 0]} scale={[0.2, 0.05, 1]} materials={["shadowMaterial"]} opacity={0.3} />
+          {/* Base do Roteador (Corpo principal) */}
+          <ViroBox position={[0, 0.02, 0]} scale={[0.18, 0.035, 0.12]} materials={["routerBody"]} />
+          
+          {/* Antena Esquerda inclinada para trás e para o lado */}
+          <ViroBox position={[-0.06, 0.08, -0.05]} scale={[0.008, 0.14, 0.008]} rotation={[15, 0, -15]} materials={["routerAntenna"]} />
+          
+          {/* Antena Direita inclinada para trás e para o lado */}
+          <ViroBox position={[0.06, 0.08, -0.05]} scale={[0.008, 0.14, 0.008]} rotation={[15, 0, 15]} materials={["routerAntenna"]} />
+          
+          {/* Painel Frontal com LEDs Verdes (Status de Rede) */}
+          <ViroBox position={[0, 0.02, 0.06]} scale={[0.04, 0.005, 0.005]} materials={["routerLed"]} />
+          
+          {/* Sombra dinâmica falsa no chão para dar senso de profundidade */}
+          <ViroQuad position={[0, 0.001, 0]} rotation={[-90, 0, 0]} scale={[0.2, 0.15, 1]} materials={["shadowMaterial"]} opacity={0.4} />
         </ViroNode>
       )}
 
@@ -134,6 +148,13 @@ export default function ARScreen({ route, navigation }) {
   const [point2, setPoint2] = useState(null);
   const [distance, setDistance] = useState(0);
   const [reticleActive, setReticleActive] = useState(false);
+  const [warningMessage, setWarningMessage] = useState(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  const showWarning = (msg) => {
+    setWarningMessage(msg);
+    setTimeout(() => setWarningMessage(null), 3500);
+  };
 
   // Inicializar estado global
   React.useEffect(() => {
@@ -151,7 +172,7 @@ export default function ARScreen({ route, navigation }) {
 
   const handleActionPress = async () => {
     if (!_arSceneRef || !_arSceneRef.performARHitTestWithPoint) {
-        Alert.alert('Aguarde', 'Câmera AR inicializando...');
+        showWarning('Câmera AR inicializando... Aguarde.');
         return;
     }
     
@@ -174,7 +195,7 @@ export default function ARScreen({ route, navigation }) {
       }
 
       if (!pos) {
-        Alert.alert('Calibrando Superfície', 'Mova o celular lentamente pelo ambiente para a câmera focar na parede/chão antes de marcar o ponto.');
+        showWarning('Mova o celular lentamente pelo ambiente para a câmera focar na parede ou chão.');
         return;
       }
 
@@ -203,14 +224,19 @@ export default function ARScreen({ route, navigation }) {
       }
     } catch (e) {
       console.log('AR Fallback failed', e);
-      Alert.alert('Erro', 'Ocorreu um erro no motor AR. Tente apontar para outro local.');
+      showWarning('Ocorreu um erro ao processar a medição. Tente outro ângulo.');
     }
   };
 
   const handleFinish = () => {
     const data = isCuboMode ? { cubePosition: cubePos } : { distanceMeters: distance };
     completeTask(taskKey, { arData: data });
-    Alert.alert('Sucesso', 'Dados AR salvos com sucesso!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+    
+    setShowSuccess(true);
+    setTimeout(() => {
+      setShowSuccess(false);
+      navigation.goBack();
+    }, 1500);
   };
 
   const reset = () => {
@@ -249,6 +275,13 @@ export default function ARScreen({ route, navigation }) {
         </Text>
       </View>
 
+      {/* Warning Toast Banner */}
+      {warningMessage && (
+        <View style={styles.warningBanner} pointerEvents="none">
+          <Text style={styles.warningText}>⚠️ {warningMessage}</Text>
+        </View>
+      )}
+
       {/* Distância */}
       {!isCuboMode && point1 && point2 && (
         <View style={styles.distanceBanner} pointerEvents="none">
@@ -276,6 +309,14 @@ export default function ARScreen({ route, navigation }) {
           </View>
         )}
       </View>
+
+      {/* Success Overlay */}
+      {showSuccess && (
+        <View style={styles.successOverlay}>
+          <Text style={styles.successIcon}>✅</Text>
+          <Text style={styles.successText}>Salvo com sucesso!</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -301,4 +342,9 @@ const styles = StyleSheet.create({
   confirmBtnText: { color: '#0f172a', fontSize: 16, fontWeight: 'bold' },
   retryBtn: { flex: 1, backgroundColor: 'rgba(255,255,255,0.2)', paddingVertical: 18, borderRadius: 12, alignItems: 'center' },
   retryBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  warningBanner: { position: 'absolute', top: 110, width: '90%', alignSelf: 'center', backgroundColor: '#f59e0b', padding: 14, borderRadius: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.5, shadowRadius: 4, elevation: 5 },
+  warningText: { color: '#fff', fontWeight: 'bold', textAlign: 'center', fontSize: 15, lineHeight: 20 },
+  successOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
+  successIcon: { fontSize: 80, marginBottom: 20 },
+  successText: { color: '#4ade80', fontSize: 26, fontWeight: 'bold' },
 });

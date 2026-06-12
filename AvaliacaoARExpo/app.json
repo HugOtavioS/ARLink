@@ -84,6 +84,10 @@
           "isAccessMediaLocationEnabled": false
         }
       ]
-    ]
+    ],
+    "extra": {
+      "n8nChatWebhookUrl": "https://misaelbm.app.n8n.cloud/webhook/chatbot",
+      "n8nWebhookBearerToken": ""
+    }
   }
 }

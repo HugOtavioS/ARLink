@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useEvaluation } from '../contexts/EvaluationContext';
 import { Button } from '../components/ui/Button';
@@ -37,6 +37,20 @@ export default function ChecklistScreen({ navigation }) {
   const { evaluationData, completeTask } = useEvaluation();
   const { tasks } = evaluationData;
 
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Chat')}
+          style={{ marginRight: 8 }}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Text style={{ color: COLORS.primary, fontWeight: 'bold', fontSize: 16 }}>Chat</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
+
   const totalTasks = Object.keys(tasks).length;
   const completedTasks = Object.values(tasks).filter(t => t.completed).length;
   const isAllCompleted = completedTasks === totalTasks;
@@ -51,6 +65,15 @@ export default function ChecklistScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressText}>
+          Progresso: {completedTasks} de {totalTasks} passos
+        </Text>
+        <View style={styles.progressBarBg}>
+          <View style={[styles.progressBarFill, { width: `${(completedTasks / totalTasks) * 100}%` }]} />
+        </View>
+      </View>
+      
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
         {Object.entries(tasks).map(([key, task]) => {
           const info = TASKS_INFO[key];
@@ -67,11 +90,10 @@ export default function ChecklistScreen({ navigation }) {
               
               <TouchableOpacity 
                 style={[styles.actionButton, task.completed && styles.actionButtonCompleted]}
-                onPress={() => !task.completed && handleAction(key, info)}
-                disabled={task.completed}
+                onPress={() => handleAction(key, info)}
               >
-                <Text style={styles.actionButtonText}>
-                  {task.completed ? '✅ Concluído' : info.buttonText}
+                <Text style={[styles.actionButtonText, task.completed && { color: '#4ade80' }]}>
+                  {task.completed ? '🔁 Refazer passo' : info.buttonText}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -94,6 +116,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  progressHeader: {
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 10,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  progressText: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: COLORS.background,
+    borderRadius: 3,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#4ade80',
+    borderRadius: 3,
   },
   list: {
     flex: 1,
