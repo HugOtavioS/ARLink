@@ -8,7 +8,7 @@ import { COLORS } from '../config/colors';
 const API_URL = 'https://caddie-dislodge-unscented.ngrok-free.dev/api';
 
 export default function CustomerDataScreen({ navigation }) {
-  const { updateCustomerData } = useEvaluation();
+  const { loadExistingEvaluation } = useEvaluation();
   const [protocolo, setProtocolo] = useState('');
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -33,14 +33,14 @@ export default function CustomerDataScreen({ navigation }) {
       const data = await response.json();
       
       // Sucesso! O protocolo existe e está aguardando.
-      // Preenchemos os dados no contexto global.
-      updateCustomerData({
+      // Preenchemos os dados no contexto global (restaurando caso haja avaliação anterior)
+      loadExistingEvaluation({
         protocolo: data.codigo,
         nome: data.cliente_nome,
         endereco: data.endereco,
         telefone: data.telefone || 'Não informado',
         email: 'Não informado',
-      });
+      }, data.existingEvaluation);
 
       navigation.navigate('Welcome');
     } catch (e) {

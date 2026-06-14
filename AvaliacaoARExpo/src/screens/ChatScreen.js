@@ -147,10 +147,9 @@ export default function ChatScreen() {
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Chat com o assistente</Text>
+              <Text style={styles.emptyTitle}>Assistente Virtual</Text>
               <Text style={styles.emptySubtitle}>
-                As mensagens são enviadas ao n8n. Os dados do cliente atual são incluídos como
-                contexto opcional.
+                Tire suas dúvidas sobre o processo de instalação, materiais ou etapas da vistoria com o nosso assistente.
               </Text>
             </View>
           }

@@ -246,7 +246,14 @@
           cliente: customer.nome,
           medicao_distancia_metros: distanceMeters,
           foto_base64: base64Photo,
-          data_envio: new Date().toISOString()
+          data_envio: new Date().toISOString(),
+          grau_complexidade: complexity,
+          categorias_roteador: selectedCats.includes('corporativo')
+            ? [...selectedCats.filter(c => c !== 'corporativo'), 'custo_beneficio', 'mesh']
+            : selectedCats,
+          infraestrutura_passagem: tasks.medicaoAR?.arData?.infraestrutura || null,
+          tomada_proxima: tasks.cuboAR?.arData?.temTomadaProxima || null,
+          voltagem_tomada: tasks.cuboAR?.arData?.voltagemTomada || null
         };
 
         // URL do webhook do n8n atualizada
@@ -294,46 +301,52 @@
       
       const recomendacoes = parsedResponse?.recomendacoes;
 
-      if (recomendacoes || (parsedResponse && (parsedResponse.ai_recommendation || parsedResponse.analysis))) {
-        const obstacles = recomendacoes ? (recomendacoes.observacoes_instalacao || []) : (parsedResponse.obstacles || []);
-        const n8nAnalysis = recomendacoes ? (recomendacoes.resumo_tecnico || '') : (parsedResponse.ai_recommendation || parsedResponse.analysis);
-        const alerts = recomendacoes ? (recomendacoes.alertas || []) : [];
-        const tempoEstimado = recomendacoes ? (recomendacoes.estimativa_tempo_instalacao_horas || 1) : 1;
+      if (recomendacoes) {
+        const obstacles = recomendacoes.observacoes_instalacao || [];
+        const n8nAnalysis = recomendacoes.resumo_tecnico || '';
+        const alerts = recomendacoes.alertas || [];
+        const tempoEstimado = recomendacoes.estimativa_tempo_instalacao_horas || null;
 
-        // 1. Lógica de Cabos e Acessórios
-        const n8nCable = recomendacoes ? Number(recomendacoes.metragem_cabo_calculada) : 0;
-        const UTPCableLength = Math.ceil(distanceMeters * 1.2 + 5); // 20% folga + 5m
-        const recommendedCable = n8nCable > 0 ? n8nCable : Math.max(10, UTPCableLength); // Mínimo 10m
+        // 1. Extração estritamente dinâmica de Cabos, Conectores e Ferramentas do array de itens_recomendados
+        const items = recomendacoes.itens_recomendados || [];
         
-        const conectorItem = recomendacoes?.itens_recomendados?.find(item => item.categoria === 'Conector' || item.item === 'RJ45');
-        const recommendedConnectors = conectorItem ? Number(conectorItem.quantidade) : 4;
-        const recommendedClips = Math.ceil(recommendedCable * 3); // 3 clips por metro
+        // Cabo
+        const caboItem = items.find(item => item.categoria === 'Cabo' || item.categoria === 'cabo' || item.item?.toLowerCase().includes('cabo'));
+        const caboMetros = caboItem ? Number(caboItem.quantidade) : Number(recomendacoes.metragem_cabo_calculada || 0);
+        const tipoCabo = caboItem ? caboItem.item : (recomendacoes.tipo_cabo_escolhido || null);
+
+        // Conector
+        const conectorItem = items.find(item => item.categoria === 'Conector' || item.categoria === 'conector' || item.item?.toLowerCase().includes('conector') || item.item?.includes('RJ45'));
+        const conectoresRJ45 = conectorItem ? Number(conectorItem.quantidade) : null;
+
+        // Fixadores
+        const fixadoresItem = items.find(item => item.categoria === 'Fixador' || item.categoria === 'fixador' || item.item?.toLowerCase().includes('fixador') || item.item?.toLowerCase().includes('clip') || item.item?.toLowerCase().includes('grapa'));
+        const fixadoresCabo = fixadoresItem ? Number(fixadoresItem.quantidade) : null;
+
+        // Ferramentas (somente o que vem do n8n)
+        const ferramentas = items
+          .filter(item => item.categoria === 'Ferramenta' || item.categoria === 'ferramenta')
+          .map(item => `${item.item}${item.quantidade && item.quantidade > 1 ? ` (${item.quantidade}x)` : ''}`);
+
+        // Itens adicionais (acessórios/outros, exceto cabo, conector, fixador, ferramenta e roteador)
+        const itensAdicionais = items
+          .filter(item => 
+            item.categoria !== 'Cabo' && item.categoria !== 'cabo' &&
+            item.categoria !== 'Conector' && item.categoria !== 'conector' &&
+            item.categoria !== 'Fixador' && item.categoria !== 'fixador' &&
+            item.categoria !== 'Ferramenta' && item.categoria !== 'ferramenta' &&
+            item.categoria !== 'Roteador' && item.categoria !== 'roteador'
+          )
+          .map(item => `${item.item}${item.quantidade && item.quantidade > 1 ? ` (${item.quantidade}x)` : ''}`);
 
         cabosFerramentas = {
-          cabo_utp_metros: recommendedCable,
-          tipo_cabo: recomendacoes ? (recomendacoes.tipo_cabo_escolhido || 'Cat5e') : 'Cat5e',
-          conectores_rj45: recommendedConnectors,
-          fixadores_cabo_unidades: recommendedClips,
-          ferramentas: [
-            'Alicate Crimpador RJ45',
-            'Decapador de Cabo UTP',
-            'Testador de Cabo RJ45',
-            'Fita Isolante',
-            'Passa Fio (Guia de Cabo)'
-          ],
-          itens_adicionais: ['Fita dupla face 3M']
+          cabo_utp_metros: caboMetros > 0 ? caboMetros : null,
+          tipo_cabo: tipoCabo || null,
+          conectores_rj45: conectoresRJ45,
+          fixadores_cabo_unidades: fixadoresCabo,
+          ferramentas: ferramentas.length > 0 ? ferramentas : null,
+          itens_adicionais: itensAdicionais.length > 0 ? itensAdicionais : null
         };
-
-        // Adiciona ferramentas específicas de acordo com obstáculos
-        const lowercaseObstacles = obstacles.map(o => o.toLowerCase());
-        if (lowercaseObstacles.some(o => o.includes('concreto') || o.includes('parede') || o.includes('tijolo'))) {
-          cabosFerramentas.ferramentas.push('Furadeira de Impacto', 'Broca de Concreto 6mm', 'Broca de Concreto 8mm');
-          cabosFerramentas.itens_adicionais.push('Bucha Plástica 6mm', 'Parafusos Philips 6mm');
-        }
-        if (lowercaseObstacles.some(o => o.includes('madeira') || o.includes('divisor'))) {
-          cabosFerramentas.ferramentas.push('Broca de Madeira 6mm');
-          cabosFerramentas.itens_adicionais.push('Parafusos autoatarraxantes para madeira');
-        }
 
         // 2. Seleção de Roteadores Recomendados (Consulta no Banco com a nova coluna categoria)
         const [allRouters] = await connection.execute(
@@ -341,9 +354,7 @@
         );
         
         let matchedRouterIds = [];
-        
-        // Se a IA do n8n sugeriu um roteador específico nas recomendações
-        const n8nRouterItem = recomendacoes?.itens_recomendados?.find(item => item.categoria === 'Roteador');
+        const n8nRouterItem = items.find(item => item.categoria === 'Roteador' || item.categoria === 'roteador');
         const suggestedModel = n8nRouterItem?.modelo_sugerido || n8nRouterItem?.item || '';
         
         if (suggestedModel) {
@@ -357,46 +368,19 @@
           }
         }
 
-        // Se não casou via modelo explícito, aplica algoritmo padrão baseando-se em categoria/complexidade
-        if (matchedRouterIds.length === 0) {
-          let filteredRouters = allRouters;
-          if (selectedCats.length > 0) {
-            filteredRouters = allRouters.filter(r => selectedCats.includes(r.categoria));
-          }
-
-          if (complexity === 'alto' || distanceMeters >= 15 || lowercaseObstacles.some(o => o.includes('concreto') || o.includes('laje'))) {
-            const premiumRouters = filteredRouters.filter(r => r.categoria === 'mesh' || r.categoria === 'high_tech' || r.categoria === 'corporativo');
-            if (premiumRouters.length > 0) {
-              matchedRouterIds = premiumRouters.map(r => r.id);
-            }
-          } else if (complexity === 'baixo' && distanceMeters < 12 && !lowercaseObstacles.some(o => o.includes('concreto'))) {
-            const basicRouters = filteredRouters.filter(r => r.categoria === 'barato' || r.categoria === 'custo_beneficio');
-            if (basicRouters.length > 0) {
-              matchedRouterIds = basicRouters.map(r => r.id);
-            }
-          }
-
-          if (matchedRouterIds.length === 0) {
-            matchedRouterIds = filteredRouters.map(r => r.id);
-          }
-          if (matchedRouterIds.length === 0) {
-            matchedRouterIds = allRouters.map(r => r.id);
-          }
-        }
-
         recommendedRouterIds = matchedRouterIds;
         n8nResponseValue = {
           obstacles,
           analysis: n8nAnalysis,
           alertas: alerts,
           tempo_estimado: tempoEstimado,
-          grau_complexidade_avaliado: recomendacoes ? (recomendacoes.grau_complexidade_avaliado || null) : null
+          grau_complexidade_avaliado: recomendacoes.grau_complexidade_avaliado || null
         };
       } else {
-        console.log('[Recomendacao] n8n indisponível durante o envio. Gravando recomendação em branco.');
+        console.log('[Recomendacao] n8n indisponível ou resposta incompleta. Gravando recomendação em branco.');
         n8nResponseValue = {
-          error: 'n8n_indisponivel',
-          analysis: 'Erro: Processamento do n8n indisponível no momento. O sistema tentará gerar as recomendações automaticamente assim que a conexão com o n8n for restabelecida e este laudo for aberto.'
+          error: 'recomendacao_indisponivel',
+          analysis: 'Não foi possível gerar recomendações automáticas para este laudo porque o serviço de análise (n8n) está indisponível ou a resposta foi incompleta/inválida.'
         };
       }
 
@@ -486,7 +470,62 @@
         return res.status(404).json({ error: 'Protocolo inválido, inexistente ou já finalizado.' });
       }
       
-      res.json(rows[0]);
+      const protocoloData = rows[0];
+
+      // Se existir avaliação, podemos buscar os dados dela
+      const [avaliacoes] = await pool.query(
+        `SELECT * FROM avaliacoes WHERE protocolo = ?`,
+        [codigo]
+      );
+
+      if (avaliacoes.length > 0) {
+        const avaliacao = avaliacoes[0];
+        
+        // Busca evidencias
+        const [evidencias] = await pool.query(
+          `SELECT * FROM evidencias WHERE avaliacao_id = ?`,
+          [avaliacao.id]
+        );
+
+        // Busca recomendacoes para pegar complexidade e categorias_roteador
+        const [recomendacoes] = await pool.query(
+          `SELECT * FROM recomendacoes WHERE avaliacao_id = ?`,
+          [avaliacao.id]
+        );
+
+        const tasks = {};
+        evidencias.forEach(e => {
+          tasks[e.tipo_tarefa] = {
+            completed: e.completada === 1,
+            mediaUri: e.media_url,
+            arData: e.dados_ar ? (typeof e.dados_ar === 'string' ? JSON.parse(e.dados_ar) : e.dados_ar) : null,
+            points: e.pontos_obtidos
+          };
+        });
+
+        let complexidade = null;
+        let categorias_roteador = [];
+        if (recomendacoes.length > 0) {
+          complexidade = recomendacoes[0].grau_complexidade;
+          try {
+            categorias_roteador = typeof recomendacoes[0].categorias_roteador === 'string' 
+              ? JSON.parse(recomendacoes[0].categorias_roteador) 
+              : (recomendacoes[0].categorias_roteador || []);
+          } catch (e) {
+            categorias_roteador = [];
+          }
+        }
+
+        protocoloData.existingEvaluation = {
+          totalScore: avaliacao.total_score,
+          status: avaliacao.status,
+          complexidade,
+          categoriasSelected: categorias_roteador,
+          tasks
+        };
+      }
+      
+      res.json(protocoloData);
     } catch (err) {
       console.error('Erro ao validar protocolo:', err);
       res.status(500).json({ error: 'Erro interno ao validar protocolo.' });
@@ -575,9 +614,20 @@
           let base64Photo = null;
           
           const medicaoEv = evs.find(e => e.tipo_tarefa === 'medicaoAR');
+          let infraestrutura = null;
           if (medicaoEv && medicaoEv.dados_ar) {
             const arData = typeof medicaoEv.dados_ar === 'string' ? JSON.parse(medicaoEv.dados_ar) : medicaoEv.dados_ar;
             distanceMeters = arData.distanceMeters || 0;
+            infraestrutura = arData.infraestrutura || null;
+          }
+
+          let temTomadaProxima = null;
+          let voltagemTomada = null;
+          const cuboEv = evs.find(e => e.tipo_tarefa === 'cuboAR');
+          if (cuboEv && cuboEv.dados_ar) {
+            const arData = typeof cuboEv.dados_ar === 'string' ? JSON.parse(cuboEv.dados_ar) : cuboEv.dados_ar;
+            temTomadaProxima = arData.temTomadaProxima !== undefined ? arData.temTomadaProxima : null;
+            voltagemTomada = arData.voltagemTomada || null;
           }
 
           const fotoEv = evs.find(e => e.tipo_tarefa === 'fotoGeral');
@@ -603,6 +653,9 @@
             foto_base64: base64Photo,
             grau_complexidade: rec.grau_complexidade,
             categorias_roteador: rec.categorias_roteador ? JSON.parse(rec.categorias_roteador) : [],
+            infraestrutura_passagem: infraestrutura,
+            tomada_proxima: temTomadaProxima,
+            voltagem_tomada: voltagemTomada,
             data_envio: new Date().toISOString()
           };
 
@@ -638,55 +691,60 @@
           
           const recomendacoes = parsedResponse?.recomendacoes;
 
-          if (recomendacoes || (parsedResponse && (parsedResponse.ai_recommendation || parsedResponse.analysis))) {
-            const obstacles = recomendacoes ? (recomendacoes.observacoes_instalacao || []) : (parsedResponse.obstacles || []);
-            const n8nAnalysis = recomendacoes ? (recomendacoes.resumo_tecnico || '') : (parsedResponse.ai_recommendation || parsedResponse.analysis);
-            const alerts = recomendacoes ? (recomendacoes.alertas || []) : [];
-            const tempoEstimado = recomendacoes ? (recomendacoes.estimativa_tempo_instalacao_horas || 1) : 1;
+          if (recomendacoes) {
+            const obstacles = recomendacoes.observacoes_instalacao || [];
+            const n8nAnalysis = recomendacoes.resumo_tecnico || '';
+            const alerts = recomendacoes.alertas || [];
+            const tempoEstimado = recomendacoes.estimativa_tempo_instalacao_horas || null;
 
-            // Lógica de cabos e ferramentas
-            const n8nCable = recomendacoes ? Number(recomendacoes.metragem_cabo_calculada) : 0;
-            const UTPCableLength = Math.ceil(distanceMeters * 1.2 + 5);
-            const recommendedCable = n8nCable > 0 ? n8nCable : Math.max(10, UTPCableLength);
+            // 1. Extração estritamente dinâmica de Cabos, Conectores e Ferramentas do array de itens_recomendados
+            const items = recomendacoes.itens_recomendados || [];
             
-            const conectorItem = recomendacoes?.itens_recomendados?.find(item => item.categoria === 'Conector' || item.item === 'RJ45');
-            const recommendedConnectors = conectorItem ? Number(conectorItem.quantidade) : 4;
-            const recommendedClips = Math.ceil(recommendedCable * 3);
+            // Cabo
+            const caboItem = items.find(item => item.categoria === 'Cabo' || item.categoria === 'cabo' || item.item?.toLowerCase().includes('cabo'));
+            const caboMetros = caboItem ? Number(caboItem.quantidade) : Number(recomendacoes.metragem_cabo_calculada || 0);
+            const tipoCabo = caboItem ? caboItem.item : (recomendacoes.tipo_cabo_escolhido || null);
+
+            // Conector
+            const conectorItem = items.find(item => item.categoria === 'Conector' || item.categoria === 'conector' || item.item?.toLowerCase().includes('conector') || item.item?.includes('RJ45'));
+            const conectoresRJ45 = conectorItem ? Number(conectorItem.quantidade) : null;
+
+            // Fixadores
+            const fixadoresItem = items.find(item => item.categoria === 'Fixador' || item.categoria === 'fixador' || item.item?.toLowerCase().includes('fixador') || item.item?.toLowerCase().includes('clip') || item.item?.toLowerCase().includes('grapa'));
+            const fixadoresCabo = fixadoresItem ? Number(fixadoresItem.quantidade) : null;
+
+            // Ferramentas (somente o que vem do n8n)
+            const ferramentas = items
+              .filter(item => item.categoria === 'Ferramenta' || item.categoria === 'ferramenta')
+              .map(item => `${item.item}${item.quantidade && item.quantidade > 1 ? ` (${item.quantidade}x)` : ''}`);
+
+            // Itens adicionais (acessórios/outros, exceto cabo, conector, fixador, ferramenta e roteador)
+            const itensAdicionais = items
+              .filter(item => 
+                item.categoria !== 'Cabo' && item.categoria !== 'cabo' &&
+                item.categoria !== 'Conector' && item.categoria !== 'conector' &&
+                item.categoria !== 'Fixador' && item.categoria !== 'fixador' &&
+                item.categoria !== 'Ferramenta' && item.categoria !== 'ferramenta' &&
+                item.categoria !== 'Roteador' && item.categoria !== 'roteador'
+              )
+              .map(item => `${item.item}${item.quantidade && item.quantidade > 1 ? ` (${item.quantidade}x)` : ''}`);
 
             cabosFerramentas = {
-              cabo_utp_metros: recommendedCable,
-              tipo_cabo: recomendacoes ? (recomendacoes.tipo_cabo_escolhido || 'Cat5e') : 'Cat5e',
-              conectores_rj45: recommendedConnectors,
-              fixadores_cabo_unidades: recommendedClips,
-              ferramentas: [
-                'Alicate Crimpador RJ45',
-                'Decapador de Cabo UTP',
-                'Testador de Cabo RJ45',
-                'Fita Isolante',
-                'Passa Fio (Guia de Cabo)'
-              ],
-              itens_adicionais: ['Fita dupla face 3M']
+              cabo_utp_metros: caboMetros > 0 ? caboMetros : null,
+              tipo_cabo: tipoCabo || null,
+              conectores_rj45: conectoresRJ45,
+              fixadores_cabo_unidades: fixadoresCabo,
+              ferramentas: ferramentas.length > 0 ? ferramentas : null,
+              itens_adicionais: itensAdicionais.length > 0 ? itensAdicionais : null
             };
-
-            const lowercaseObstacles = obstacles.map(o => o.toLowerCase());
-            if (lowercaseObstacles.some(o => o.includes('concreto') || o.includes('parede') || o.includes('tijolo'))) {
-              cabosFerramentas.ferramentas.push('Furadeira de Impacto', 'Broca de Concreto 6mm', 'Broca de Concreto 8mm');
-              cabosFerramentas.itens_adicionais.push('Bucha Plástica 6mm', 'Parafusos Philips 6mm');
-            }
-            if (lowercaseObstacles.some(o => o.includes('madeira') || o.includes('divisor'))) {
-              cabosFerramentas.ferramentas.push('Broca de Madeira 6mm');
-              cabosFerramentas.itens_adicionais.push('Parafusos autoatarraxantes para madeira');
-            }
 
             // Seleção de roteadores
             const [allRouters] = await pool.query(
               'SELECT id, modelo, marca, padrao_wifi, categoria FROM roteadores'
             );
-            const selectedCats = rec.categorias_roteador ? JSON.parse(rec.categorias_roteador) : [];
             let matchedRouterIds = [];
             
-            // Casamento com modelo explícito do n8n
-            const n8nRouterItem = recomendacoes?.itens_recomendados?.find(item => item.categoria === 'Roteador');
+            const n8nRouterItem = items.find(item => item.categoria === 'Roteador' || item.categoria === 'roteador');
             const suggestedModel = n8nRouterItem?.modelo_sugerido || n8nRouterItem?.item || '';
             
             if (suggestedModel) {
@@ -700,32 +758,13 @@
               }
             }
 
-            // Algoritmo padrão se não casou via modelo explícito
-            if (matchedRouterIds.length === 0) {
-              let filteredRouters = allRouters;
-              if (selectedCats.length > 0) {
-                filteredRouters = allRouters.filter(r => selectedCats.includes(r.categoria));
-              }
-
-              if (rec.grau_complexidade === 'alto' || distanceMeters >= 15 || lowercaseObstacles.some(o => o.includes('concreto') || o.includes('laje'))) {
-                const premiumRouters = filteredRouters.filter(r => r.categoria === 'mesh' || r.categoria === 'high_tech' || r.categoria === 'corporativo');
-                if (premiumRouters.length > 0) matchedRouterIds = premiumRouters.map(r => r.id);
-              } else if (rec.grau_complexidade === 'baixo' && distanceMeters < 12 && !lowercaseObstacles.some(o => o.includes('concreto'))) {
-                const basicRouters = filteredRouters.filter(r => r.categoria === 'barato' || r.categoria === 'custo_beneficio');
-                if (basicRouters.length > 0) matchedRouterIds = basicRouters.map(r => r.id);
-              }
-
-              if (matchedRouterIds.length === 0) matchedRouterIds = filteredRouters.map(r => r.id);
-              if (matchedRouterIds.length === 0) matchedRouterIds = allRouters.map(r => r.id);
-            }
-
             recommendedRouterIds = matchedRouterIds;
             n8nResponse = {
               obstacles,
               analysis: n8nAnalysis,
               alertas: alerts,
               tempo_estimado: tempoEstimado,
-              grau_complexidade_avaliado: recomendacoes ? (recomendacoes.grau_complexidade_avaliado || null) : null
+              grau_complexidade_avaliado: recomendacoes.grau_complexidade_avaliado || null
             };
 
             // Salva as recomendações geradas no banco de dados (UPDATE)

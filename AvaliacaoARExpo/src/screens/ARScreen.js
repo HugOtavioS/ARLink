@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Dimensions, unstable_batchedUpdates } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Dimensions, unstable_batchedUpdates, Modal } from 'react-native';
 import { ViroARSceneNavigator, ViroARScene, ViroBox, ViroSphere, ViroMaterials, ViroAmbientLight, ViroSpotLight, ViroNode, ViroQuad } from '@reactvision/react-viro';
 import { useEvaluation } from '../contexts/EvaluationContext';
 import { COLORS } from '../config/colors';
@@ -35,8 +35,7 @@ function lineGeometry(p1, p2) {
 const _sceneState = {
   isCuboMode: false,
   cubePos: null,
-  point1: null,
-  point2: null,
+  points: [],
   lastHitPos: null,
 };
 let _forceSceneUpdate = null;
@@ -76,22 +75,32 @@ const ARSceneComponent = () => {
     }
   };
 
-  const { isCuboMode, cubePos, point1, point2 } = _sceneState;
+  const { isCuboMode, cubePos, points } = _sceneState;
 
-  let lineBox = null;
-  if (point1 && point2) {
-    const line = lineGeometry(point1, point2);
-    // Viro C++ crasha se o tamanho for menor que 2cm ou maior que 10 metros
-    if (line.length >= 0.02 && line.length <= 10) {
-      lineBox = (
-        <ViroBox
-          position={line.position}
-          rotation={line.rotation}
-          scale={[0.006, 0.006, line.length]}
-          materials={['measureLine']}
-        />
+  const spheres = [];
+  const lines = [];
+
+  if (!isCuboMode && points && points.length > 0) {
+    points.forEach((p, idx) => {
+      spheres.push(
+        <ViroSphere key={`marker-${idx}`} position={p} radius={0.014} materials={['measureMarker']} />
       );
-    }
+      if (idx > 0) {
+        const prevP = points[idx - 1];
+        const line = lineGeometry(prevP, p);
+        if (line.length >= 0.02 && line.length <= 10) {
+          lines.push(
+            <ViroBox
+              key={`line-${idx}`}
+              position={line.position}
+              rotation={line.rotation}
+              scale={[0.006, 0.006, line.length]}
+              materials={['measureLine']}
+            />
+          );
+        }
+      }
+    });
   }
 
   return (
@@ -123,15 +132,8 @@ const ARSceneComponent = () => {
         </ViroNode>
       )}
 
-      {!isCuboMode && point1 && (
-        <ViroSphere position={point1} radius={0.014} materials={['measureMarker']} />
-      )}
-      
-      {!isCuboMode && point2 && (
-        <ViroSphere position={point2} radius={0.014} materials={['measureMarker']} />
-      )}
-
-      {!isCuboMode && lineBox}
+      {!isCuboMode && spheres}
+      {!isCuboMode && lines}
     </ViroARScene>
   );
 };
@@ -144,12 +146,15 @@ export default function ARScreen({ route, navigation }) {
   const isCuboMode = taskKey === 'cuboAR';
 
   const [cubePos, setCubePos] = useState(null);
-  const [point1, setPoint1] = useState(null);
-  const [point2, setPoint2] = useState(null);
+  const [points, setPoints] = useState([]);
   const [distance, setDistance] = useState(0);
   const [reticleActive, setReticleActive] = useState(false);
   const [warningMessage, setWarningMessage] = useState(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showInfraModal, setShowInfraModal] = useState(false);
+  const [infraStage, setInfraStage] = useState('menu'); // 'menu', 'conduite', 'aparente'
+  const [showElectricModal, setShowElectricModal] = useState(false);
+  const [showVoltageModal, setShowVoltageModal] = useState(false);
 
   const showWarning = (msg) => {
     setWarningMessage(msg);
@@ -160,8 +165,7 @@ export default function ARScreen({ route, navigation }) {
   React.useEffect(() => {
     _sceneState.isCuboMode = isCuboMode;
     _sceneState.cubePos = null;
-    _sceneState.point1 = null;
-    _sceneState.point2 = null;
+    _sceneState.points = [];
     _sceneState.lastHitPos = null;
     _setReticleActive = setReticleActive;
     return () => {
@@ -207,20 +211,18 @@ export default function ARScreen({ route, navigation }) {
           _forceSceneUpdate && _forceSceneUpdate();
         });
       } else {
-        if (!point1) {
-          unstable_batchedUpdates(() => {
-            setPoint1(pos);
-            _sceneState.point1 = pos;
-            _forceSceneUpdate && _forceSceneUpdate();
-          });
-        } else if (!point2) {
-          unstable_batchedUpdates(() => {
-            setPoint2(pos);
-            _sceneState.point2 = pos;
-            setDistance(distance3d(point1, pos));
-            _forceSceneUpdate && _forceSceneUpdate();
-          });
-        }
+        const newPoints = [...points, pos];
+        unstable_batchedUpdates(() => {
+          setPoints(newPoints);
+          _sceneState.points = newPoints;
+          
+          let totalDist = 0;
+          for (let i = 0; i < newPoints.length - 1; i++) {
+            totalDist += distance3d(newPoints[i], newPoints[i + 1]);
+          }
+          setDistance(totalDist);
+          _forceSceneUpdate && _forceSceneUpdate();
+        });
       }
     } catch (e) {
       console.log('AR Fallback failed', e);
@@ -229,9 +231,45 @@ export default function ARScreen({ route, navigation }) {
   };
 
   const handleFinish = () => {
-    const data = isCuboMode ? { cubePosition: cubePos } : { distanceMeters: distance };
+    if (isCuboMode) {
+      // Abre o modal estilizado de validação elétrica em vez do Alert nativo
+      setShowElectricModal(true);
+    } else {
+      // Abre o modal de seleção de infraestrutura de passagem
+      setShowInfraModal(true);
+    }
+  };
+
+  const salvarDadosCubo = (temTomada, voltagem) => {
+    const data = {
+      cubePosition: cubePos,
+      temTomadaProxima: temTomada,
+      voltagemTomada: voltagem
+    };
     completeTask(taskKey, { arData: data });
     
+    setShowSuccess(true);
+    setTimeout(() => {
+      setShowSuccess(false);
+      navigation.goBack();
+    }, 1500);
+  };
+
+  const salvarDadosMedicao = (tipo, detalhe = null) => {
+    // Adiciona margem de sobra técnica de 12% no cálculo da distância final
+    const distanceWithMargin = distance * 1.12;
+    const data = {
+      distanceMeters: distanceWithMargin,
+      distanceRaw: distance,
+      infraestrutura: {
+        tipo,
+        detalhe
+      }
+    };
+    completeTask(taskKey, { arData: data });
+    
+    setShowInfraModal(false);
+    setInfraStage('menu');
     setShowSuccess(true);
     setTimeout(() => {
       setShowSuccess(false);
@@ -242,12 +280,10 @@ export default function ARScreen({ route, navigation }) {
   const reset = () => {
     unstable_batchedUpdates(() => {
       setCubePos(null);
-      setPoint1(null);
-      setPoint2(null);
+      setPoints([]);
       setDistance(0);
       _sceneState.cubePos = null;
-      _sceneState.point1 = null;
-      _sceneState.point2 = null;
+      _sceneState.points = [];
       _forceSceneUpdate && _forceSceneUpdate();
     });
   };
@@ -265,13 +301,17 @@ export default function ARScreen({ route, navigation }) {
         <View style={[styles.reticleRing, reticleActive && styles.reticleActiveRing]} />
       </View>
       
-      {/* 2D Overlay UI */}
+      {/* Overlay instruções no topo */}
       <View style={styles.overlayTop} pointerEvents="box-none">
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Text style={styles.backBtnText}>✕ Voltar</Text>
         </TouchableOpacity>
         <Text style={styles.instruction}>
-          {isCuboMode ? 'Aponte para a superfície' : (!point1 ? 'Aponte para o 1º Ponto' : (!point2 ? 'Aponte para o 2º Ponto' : 'Medição Concluída'))}
+          {isCuboMode 
+            ? '📦 Aponte para a superfície para simular o roteador' 
+            : (points.length === 0 
+                ? '📍 Aponte para a Origem do Sinal (caixa de fibra / entrada) e marque' 
+                : `📍 Próximo ponto / curva (${points.length} marcado${points.length > 1 ? 's' : ''})`)}
         </Text>
       </View>
 
@@ -283,32 +323,289 @@ export default function ARScreen({ route, navigation }) {
       )}
 
       {/* Distância */}
-      {!isCuboMode && point1 && point2 && (
+      {!isCuboMode && points.length >= 2 && (
         <View style={styles.distanceBanner} pointerEvents="none">
           <Text style={styles.distanceM}>{distance.toFixed(2)} m</Text>
           <Text style={styles.distanceCm}>{(distance * 100).toFixed(0)} cm</Text>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, marginTop: 4, fontWeight: '600' }}>
+            Sobra técnica (+12%): {(distance * 1.12).toFixed(2)} m
+          </Text>
         </View>
       )}
 
       {/* Controles de Ação */}
       <View style={styles.footer} pointerEvents="box-none">
-        {(!isCuboMode && !point2) || (isCuboMode && !cubePos) ? (
-          <TouchableOpacity style={styles.actionBtn} onPress={handleActionPress}>
-            <Text style={styles.actionBtnText}>{isCuboMode ? '📦 Colocar Roteador Aqui' : '📍 Marcar Ponto Aqui'}</Text>
-          </TouchableOpacity>
-        ) : null}
+        {isCuboMode ? (
+          !cubePos ? (
+            <TouchableOpacity style={styles.actionBtn} onPress={handleActionPress}>
+              <Text style={styles.actionBtnText}>📦 Colocar Roteador Aqui</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.actionsRow}>
+              <TouchableOpacity style={styles.confirmBtn} onPress={handleFinish}>
+                <Text style={styles.confirmBtnText}>Salvar e Confirmar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.retryBtn} onPress={reset}>
+                <Text style={styles.retryBtnText}>Refazer</Text>
+              </TouchableOpacity>
+            </View>
+          )
+        ) : (
+          <View style={{ width: '100%', gap: 10 }}>
+            <TouchableOpacity style={styles.actionBtn} onPress={handleActionPress}>
+              <Text style={styles.actionBtnText}>
+                {points.length === 0 ? '📍 Iniciar Mapeamento Aqui' : '📍 Marcar Próximo Ponto'}
+              </Text>
+            </TouchableOpacity>
 
-        {((isCuboMode && cubePos) || (!isCuboMode && point2)) && (
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.confirmBtn} onPress={handleFinish}>
-              <Text style={styles.confirmBtnText}>Salvar e Confirmar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.retryBtn} onPress={reset}>
-              <Text style={styles.retryBtnText}>Refazer</Text>
-            </TouchableOpacity>
+            {points.length >= 2 && (
+              <View style={styles.actionsRow}>
+                <TouchableOpacity style={styles.confirmBtn} onPress={handleFinish}>
+                  <Text style={styles.confirmBtnText}>Concluir Mapeamento ({points.length} Pts)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.retryBtn} onPress={reset}>
+                  <Text style={styles.retryBtnText}>Refazer</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
       </View>
+
+      {/* Modal de Infraestrutura de Passagem */}
+      <Modal
+        visible={showInfraModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowInfraModal(false);
+          setInfraStage('menu');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Infraestrutura de Passagem 🛠️</Text>
+            <Text style={styles.modalSubtitle}>
+              Como o cabo de rede será transportado ao longo do trajeto?
+            </Text>
+
+            {infraStage === 'menu' && (
+              <View style={styles.modalButtonsColumn}>
+                <TouchableOpacity 
+                  style={styles.modalOptionBtn}
+                  onPress={() => setInfraStage('conduite')}
+                >
+                  <Text style={styles.modalOptionText}>📁 Conduíte Interno</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.modalOptionBtn}
+                  onPress={() => setInfraStage('aparente')}
+                >
+                  <Text style={styles.modalOptionText}>🏢 Instalação Aparente</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.modalOptionBtn}
+                  onPress={() => salvarDadosMedicao('solto_forro', 'Solto por cima do forro/gesso')}
+                >
+                  <Text style={styles.modalOptionText}>☁️ Solto por cima do Forro/Gesso</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.modalOptionBtn, { borderColor: '#94a3b8', backgroundColor: 'rgba(71, 85, 105, 0.3)' }]}
+                  onPress={() => salvarDadosMedicao('nao_sei', 'Não sei dizer')}
+                >
+                  <Text style={[styles.modalOptionText, { color: '#94a3b8' }]}>❓ Não sei dizer</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {infraStage === 'conduite' && (
+              <View style={styles.modalButtonsColumn}>
+                <Text style={styles.modalSubTitleLabel}>Situação do Conduíte:</Text>
+                <TouchableOpacity 
+                  style={[styles.modalOptionBtn, { borderColor: '#4ade80' }]}
+                  onPress={() => salvarDadosMedicao('conduite', 'Livre')}
+                >
+                  <Text style={[styles.modalOptionText, { color: '#4ade80' }]}>🟢 Livre</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.modalOptionBtn, { borderColor: '#ef4444' }]}
+                  onPress={() => salvarDadosMedicao('conduite', 'Obstruído')}
+                >
+                  <Text style={[styles.modalOptionText, { color: '#ef4444' }]}>🔴 Obstruído</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.modalBackBtn}
+                  onPress={() => setInfraStage('menu')}
+                >
+                  <Text style={styles.modalBackBtnText}>⬅ Voltar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {infraStage === 'aparente' && (
+              <View style={styles.modalButtonsColumn}>
+                <Text style={styles.modalSubTitleLabel}>Acessórios necessários:</Text>
+                <TouchableOpacity 
+                  style={styles.modalOptionBtn}
+                  onPress={() => salvarDadosMedicao('aparente', 'Canaletas')}
+                >
+                  <Text style={styles.modalOptionText}>📏 Canaletas</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.modalOptionBtn}
+                  onPress={() => salvarDadosMedicao('aparente', 'Conduletes')}
+                >
+                  <Text style={styles.modalOptionText}>📦 Conduletes</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.modalOptionBtn}
+                  onPress={() => salvarDadosMedicao('aparente', 'Fixadores/Grapas')}
+                >
+                  <Text style={styles.modalOptionText}>📎 Fixadores / Grapas</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.modalBackBtn}
+                  onPress={() => setInfraStage('menu')}
+                >
+                  <Text style={styles.modalBackBtnText}>⬅ Voltar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {infraStage === 'menu' && (
+              <TouchableOpacity 
+                style={[styles.modalCancelBtn, { marginTop: 12 }]}
+                onPress={() => setShowInfraModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Validação Elétrica */}
+      <Modal
+        visible={showElectricModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowElectricModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Validação Elétrica ⚡</Text>
+            <Text style={styles.modalSubtitle}>
+              Existe uma tomada de energia disponível a menos de 1 metro deste ponto da simulação?
+            </Text>
+
+            <View style={styles.modalButtonsColumn}>
+              <TouchableOpacity 
+                style={[styles.modalOptionBtn, { borderColor: '#4ade80', backgroundColor: 'rgba(74, 222, 128, 0.08)' }]}
+                onPress={() => {
+                  setShowElectricModal(false);
+                  setShowVoltageModal(true);
+                }}
+              >
+                <Text style={[styles.modalOptionText, { color: '#4ade80' }]}>Sim, existe tomada</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.modalOptionBtn, { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.08)' }]}
+                onPress={() => {
+                  setShowElectricModal(false);
+                  salvarDadosCubo(false, null);
+                }}
+              >
+                <Text style={[styles.modalOptionText, { color: '#ef4444' }]}>Não existe tomada</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.modalOptionBtn, { borderColor: '#94a3b8', backgroundColor: 'rgba(148, 163, 184, 0.08)' }]}
+                onPress={() => {
+                  setShowElectricModal(false);
+                  salvarDadosCubo(null, null);
+                }}
+              >
+                <Text style={[styles.modalOptionText, { color: '#cbd5e1' }]}>Não tenho certeza</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.modalCancelBtn, { marginTop: 12 }]}
+                onPress={() => setShowElectricModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Voltagem da Tomada */}
+      <Modal
+        visible={showVoltageModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowVoltageModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Voltagem da Tomada 🔌</Text>
+            <Text style={styles.modalSubtitle}>
+              Selecione a voltagem da tomada disponível a menos de 1 metro:
+            </Text>
+
+            <View style={styles.modalButtonsColumn}>
+              <TouchableOpacity 
+                style={styles.modalOptionBtn}
+                onPress={() => {
+                  setShowVoltageModal(false);
+                  salvarDadosCubo(true, '110V');
+                }}
+              >
+                <Text style={styles.modalOptionText}>Tomada 110V</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.modalOptionBtn}
+                onPress={() => {
+                  setShowVoltageModal(false);
+                  salvarDadosCubo(true, '220V');
+                }}
+              >
+                <Text style={styles.modalOptionText}>Tomada 220V</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.modalOptionBtn, { borderColor: '#94a3b8', backgroundColor: 'rgba(148, 163, 184, 0.08)' }]}
+                onPress={() => {
+                  setShowVoltageModal(false);
+                  salvarDadosCubo(true, 'desconhecida');
+                }}
+              >
+                <Text style={[styles.modalOptionText, { color: '#cbd5e1' }]}>Não sei a voltagem</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.modalBackBtn, { marginTop: 8 }]}
+                onPress={() => {
+                  setShowVoltageModal(false);
+                  setShowElectricModal(true);
+                }}
+              >
+                <Text style={styles.modalBackBtnText}>⬅ Voltar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Success Overlay */}
       {showSuccess && (
@@ -347,4 +644,83 @@ const styles = StyleSheet.create({
   successOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
   successIcon: { fontSize: 80, marginBottom: 20 },
   successText: { color: '#4ade80', fontSize: 26, fontWeight: 'bold' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#334155',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#38bdf8',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  modalSubTitleLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#cbd5e1',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  modalButtonsColumn: {
+    width: '100%',
+    gap: 12,
+  },
+  modalOptionBtn: {
+    backgroundColor: 'rgba(51, 65, 85, 0.5)',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#475569',
+    alignItems: 'center',
+  },
+  modalOptionText: {
+    color: '#f8fafc',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalBackBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  modalBackBtnText: {
+    color: '#38bdf8',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalCancelBtn: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
 });

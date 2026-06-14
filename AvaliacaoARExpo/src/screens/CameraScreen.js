@@ -1,13 +1,18 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Image, ScrollView } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
 import { useEvaluation } from '../contexts/EvaluationContext';
 import { COLORS } from '../config/colors';
 
 export default function CameraScreen({ route, navigation }) {
-  const { taskKey, isVideo } = route.params;
-  const { completeTask } = useEvaluation();
+  const { taskKey, isVideo, isMultiple = false } = route.params;
+  const { completeTask, evaluationData } = useEvaluation();
+  
+  const existingTask = evaluationData?.tasks[taskKey];
+  const [capturedPhotos, setCapturedPhotos] = useState(
+    (existingTask && Array.isArray(existingTask.mediaUri)) ? existingTask.mediaUri : []
+  );
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
   const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
@@ -86,12 +91,20 @@ export default function CameraScreen({ route, navigation }) {
           console.log('Erro ao salvar foto na galeria:', e);
         }
         
-        completeTask(taskKey, { mediaUri: finalUri });
-        setShowSuccess(true);
-        setTimeout(() => {
-          setShowSuccess(false);
-          navigation.goBack();
-        }, 1500);
+        if (isMultiple) {
+          setCapturedPhotos(prev => [...prev, finalUri]);
+          setShowSuccess(true);
+          setTimeout(() => {
+            setShowSuccess(false);
+          }, 1000);
+        } else {
+          completeTask(taskKey, { mediaUri: finalUri });
+          setShowSuccess(true);
+          setTimeout(() => {
+            setShowSuccess(false);
+            navigation.goBack();
+          }, 1500);
+        }
       } catch (e) {
         console.error('Erro ao tirar foto:', e);
         Alert.alert('Erro', 'Falha ao tirar foto.');
@@ -110,9 +123,57 @@ export default function CameraScreen({ route, navigation }) {
       
       <View style={styles.overlay}>
         <Text style={styles.instruction}>
-          {isVideo ? 'Grave a rota do cabo' : 'Tire a foto do local'}
+          {isVideo 
+            ? 'Grave a rota do cabo' 
+            : taskKey === 'fotoGeral' 
+              ? '📸 Foto Geral: Enquadre o local geral e a tomada' 
+              : taskKey === 'fotoQuadroEnergia' 
+                ? '🔌 Quadro de Telecom/Energia: Enquadre o quadro principal' 
+                : taskKey === 'fotoTomadaAproximada' 
+                  ? '⚡ Tomada: Foto de perto onde o roteador será ligado' 
+                  : taskKey === 'fotoEntradaInternet'
+                    ? '🔌 Entrada: Ponto onde o cabo da rua entra'
+                    : taskKey === 'fotoTrechoExterno'
+                      ? '🌳 Área Externa: Foto da passagem ao tempo'
+                      : taskKey === 'fotoObstaculosFuro'
+                        ? '🧱 Obstáculos: Foto da parede que precisará de furo'
+                        : 'Tire a foto do local'}
         </Text>
+        
+        {isMultiple && (
+          <TouchableOpacity 
+            style={[styles.saveBtn, capturedPhotos.length === 0 && { opacity: 0.5 }]}
+            onPress={() => {
+              if (capturedPhotos.length > 0) {
+                completeTask(taskKey, { mediaUri: capturedPhotos });
+                navigation.goBack();
+              } else {
+                Alert.alert('Aviso', 'Tire pelo menos uma foto antes de salvar.');
+              }
+            }}
+          >
+            <Text style={styles.saveBtnText}>Salvar ({capturedPhotos.length})</Text>
+          </TouchableOpacity>
+        )}
       </View>
+
+      {isMultiple && capturedPhotos.length > 0 && (
+        <View style={styles.thumbnailContainer}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}>
+            {capturedPhotos.map((uri, idx) => (
+              <View key={idx} style={styles.thumbnailWrapper}>
+                <Image source={{ uri }} style={styles.thumbnail} />
+                <TouchableOpacity 
+                  style={styles.deleteThumbnailBtn}
+                  onPress={() => setCapturedPhotos(prev => prev.filter((_, i) => i !== idx))}
+                >
+                  <Text style={styles.deleteThumbnailText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       <View style={styles.controls}>
         <TouchableOpacity 
@@ -211,6 +272,55 @@ const styles = StyleSheet.create({
   successText: {
     color: '#4ade80',
     fontSize: 24,
+    fontWeight: 'bold',
+  },
+  saveBtn: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 15,
+    borderWidth: 1,
+    borderColor: '#000',
+  },
+  saveBtnText: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  thumbnailContainer: {
+    position: 'absolute',
+    bottom: 150,
+    width: '100%',
+    height: 90,
+  },
+  thumbnailWrapper: {
+    position: 'relative',
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#FFF',
+    overflow: 'hidden',
+  },
+  thumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  deleteThumbnailBtn: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(239, 68, 68, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteThumbnailText: {
+    color: '#FFF',
+    fontSize: 10,
     fontWeight: 'bold',
   },
 });

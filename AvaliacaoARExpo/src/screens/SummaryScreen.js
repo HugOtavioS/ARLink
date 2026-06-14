@@ -8,19 +8,29 @@ import * as FileSystem from 'expo-file-system';
 import Constants from 'expo-constants';
 
 export default function SummaryScreen({ navigation }) {
-  const { evaluationData, resetEvaluation } = useEvaluation();
+  const { evaluationData, resetEvaluation, updateSummaryData } = useEvaluation();
   const [isSending, setIsSending] = useState(false);
-  const [complexidade, setComplexidade] = useState('medio'); // 'baixo', 'medio', 'alto'
-  const [categoriasSelected, setCategoriasSelected] = useState(['custo_beneficio']); // array of selected categories
+
+  const complexidade = evaluationData.complexidade || null;
+  const categoriasSelected = evaluationData.categoriasSelected || [];
 
   const toggleCategoria = (categoria) => {
-    if (categoriasSelected.includes(categoria)) {
-      if (categoriasSelected.length > 1) {
-        setCategoriasSelected(categoriasSelected.filter(c => c !== categoria));
+    let newCats = [];
+    if (categoria === 'corporativo') {
+      if (categoriasSelected.includes('corporativo')) {
+        newCats = [];
+      } else {
+        newCats = ['corporativo'];
       }
     } else {
-      setCategoriasSelected([...categoriasSelected, categoria]);
+      const filtered = categoriasSelected.filter(c => c !== 'corporativo');
+      if (filtered.includes(categoria)) {
+        newCats = filtered.filter(c => c !== categoria);
+      } else {
+        newCats = [...filtered, categoria];
+      }
     }
+    updateSummaryData({ categoriasSelected: newCats });
   };
 
   // Calcula total possível de pontos somando o valor de cada task
@@ -57,26 +67,58 @@ export default function SummaryScreen({ navigation }) {
 
   // (Removida a lógica do IP local pois agora estamos na nuvem)
   const handleSend = async () => {
+    if (!complexidade || categoriasSelected.length === 0) {
+      Alert.alert(
+        'Opções Pendentes',
+        'Por favor, selecione uma opção para cada uma das perguntas antes de enviar para análise.'
+      );
+      return;
+    }
     setIsSending(true);
     try {
       // 1. Clonar os dados para não alterar o original antes de fazer o upload
       const finalData = JSON.parse(JSON.stringify(evaluationData));
 
-      // 1.5. Converter a foto geral em Base64 diretamente no dispositivo antes do upload
-      let base64Photo = null;
-      const fotoGeralTask = finalData.tasks.fotoGeral;
-      if (fotoGeralTask && fotoGeralTask.completed && fotoGeralTask.mediaUri) {
-        try {
-          console.log(`[n8n] Convertendo fotoGeral para Base64: ${fotoGeralTask.mediaUri}`);
-          const localUri = fotoGeralTask.mediaUri;
-          const cleanUri = localUri.startsWith('file://') ? localUri : `file://${localUri}`;
-          const base64Content = await FileSystem.readAsStringAsync(cleanUri, {
-            encoding: FileSystem.EncodingType.Base64
-          });
-          base64Photo = `data:image/jpeg;base64,${base64Content}`;
-          console.log('[n8n] Imagem convertida para Base64 com sucesso.');
-        } catch (e) {
-          console.error('[n8n] Erro ao ler foto para Base64:', e);
+      // 1.5. Converter as fotos em Base64 diretamente no dispositivo antes do upload
+      const photosBase64 = {};
+      const photoKeys = [
+        'fotoGeral',
+        'fotoQuadroEnergia',
+        'fotoTomadaAproximada',
+        'fotoEntradaInternet',
+        'fotoTrechoExterno',
+        'fotoObstaculosFuro'
+      ];
+
+      for (const key of photoKeys) {
+        const task = finalData.tasks[key];
+        if (task && task.completed && task.mediaUri && task.mediaUri !== 'nao_se_aplica') {
+          try {
+            if (Array.isArray(task.mediaUri)) {
+              const base64List = [];
+              for (const localUri of task.mediaUri) {
+                if (localUri.startsWith('file://')) {
+                  const cleanUri = localUri.startsWith('file://') ? localUri : `file://${localUri}`;
+                  const base64Content = await FileSystem.readAsStringAsync(cleanUri, {
+                    encoding: FileSystem.EncodingType.Base64
+                  });
+                  base64List.push(`data:image/jpeg;base64,${base64Content}`);
+                }
+              }
+              photosBase64[key] = base64List;
+              console.log(`[n8n] Imagem(ns) da tarefa ${key} convertida(s) para Base64 com sucesso. Total: ${base64List.length}`);
+            } else if (typeof task.mediaUri === 'string' && task.mediaUri.startsWith('file://')) {
+              console.log(`[n8n] Convertendo ${key} para Base64: ${task.mediaUri}`);
+              const cleanUri = task.mediaUri.startsWith('file://') ? task.mediaUri : `file://${task.mediaUri}`;
+              const base64Content = await FileSystem.readAsStringAsync(cleanUri, {
+                encoding: FileSystem.EncodingType.Base64
+              });
+              photosBase64[key] = `data:image/jpeg;base64,${base64Content}`;
+              console.log(`[n8n] Imagem ${key} convertida para Base64 com sucesso.`);
+            }
+          } catch (e) {
+            console.error(`[n8n] Erro ao ler foto ${key} para Base64:`, e);
+          }
         }
       }
 
@@ -91,10 +133,16 @@ export default function SummaryScreen({ navigation }) {
           protocolo: finalData.customer.protocolo,
           cliente: finalData.customer.nome,
           medicao_distancia_metros: distanceMeters,
-          foto_base64: base64Photo,
+          foto_base64: photosBase64.fotoGeral || null, // mantém compatibilidade com campo antigo
+          fotos: photosBase64, // envia todas as fotos coletadas em formato base64
           data_envio: new Date().toISOString(),
-          grau_complexidade: complexidade,
-          categorias_roteador: categoriasSelected
+          grau_complexidade: complexidade === 'nao_sei' ? 'medio' : complexidade,
+          categorias_roteador: categoriasSelected.includes('corporativo')
+            ? [...categoriasSelected.filter(c => c !== 'corporativo'), 'custo_beneficio', 'mesh']
+            : categoriasSelected,
+          infraestrutura_passagem: finalData.tasks.medicaoAR?.arData?.infraestrutura || null,
+          tomada_proxima: finalData.tasks.cuboAR?.arData?.temTomadaProxima || null,
+          voltagem_tomada: finalData.tasks.cuboAR?.arData?.voltagemTomada || null
         };
 
         const n8nResponse = await fetch(N8N_URL, {
@@ -116,7 +164,7 @@ export default function SummaryScreen({ navigation }) {
               obj.forEach(item => cleanPayload(item));
             } else {
               for (const key in obj) {
-                if (key === 'foto_base64') {
+                if (key === 'foto_base64' || key === 'fotos') {
                   delete obj[key];
                 } else if (typeof obj[key] === 'object') {
                   cleanPayload(obj[key]);
@@ -138,7 +186,20 @@ export default function SummaryScreen({ navigation }) {
       // 2. Fazer upload de todas as mídias pendentes
       for (const taskKey of Object.keys(finalData.tasks)) {
         const task = finalData.tasks[taskKey];
-        if (task.mediaUri && task.mediaUri.startsWith('file://')) {
+        if (Array.isArray(task.mediaUri)) {
+          console.log(`[Upload] Enviando multiplas imagens para a task ${taskKey}:`, task.mediaUri);
+          const uploadedUrls = [];
+          for (const localUri of task.mediaUri) {
+            if (localUri.startsWith('file://')) {
+              const uploadedUrl = await uploadImage(localUri);
+              uploadedUrls.push(uploadedUrl);
+            } else {
+              uploadedUrls.push(localUri);
+            }
+          }
+          task.mediaUri = uploadedUrls.join(',');
+          console.log(`[Upload] Sucesso! URLs da task ${taskKey}: ${task.mediaUri}`);
+        } else if (task.mediaUri && task.mediaUri.startsWith('file://')) {
           console.log(`[Upload] Tentando enviar imagem da task ${taskKey}: ${task.mediaUri}`);
           const oldUri = task.mediaUri;
           task.mediaUri = await uploadImage(task.mediaUri);
@@ -158,7 +219,7 @@ export default function SummaryScreen({ navigation }) {
         body: JSON.stringify({
           ...finalData,
           n8nResponse: n8nResponseData,
-          grau_complexidade: complexidade,
+          grau_complexidade: complexidade === 'nao_sei' ? 'medio' : complexidade,
           categorias_roteador: categoriasSelected
         }),
       });
@@ -176,7 +237,7 @@ export default function SummaryScreen({ navigation }) {
       setIsSending(false);
       Alert.alert(
         'Sucesso!',
-        `Laudo enviado com sucesso para o banco de dados AWS RDS! O Admin já pode visualizá-lo.`,
+        `Sua vistoria foi enviada com sucesso! Nossa equipe técnica analisará as informações.`,
         [{
           text: 'OK',
           onPress: () => {
@@ -191,7 +252,7 @@ export default function SummaryScreen({ navigation }) {
     } catch (e) {
       console.error(e);
       setIsSending(false);
-      Alert.alert('Erro no Envio', e.message || 'Não foi possível conectar ao servidor (Backend). Verifique o IP e o Wi-Fi.');
+      Alert.alert('Erro no Envio', e.message || 'Não foi possível conectar ao servidor de vistoria. Verifique sua conexão de internet (Wi-Fi/4G).');
     }
   };
 
@@ -229,42 +290,90 @@ export default function SummaryScreen({ navigation }) {
           <Text style={styles.sectionSubtitle}>Evidências salvas localmente no dispositivo</Text>
 
           <Text style={styles.text}>
-            📸 Foto do Local: {evaluationData.tasks.fotoGeral?.completed ? '✓ Salva na Galeria' : 'Pendente'}
+            📸 Foto Geral (Energia): {evaluationData.tasks.fotoGeral?.completed ? '✓ Salva na Galeria' : 'Pendente'}
           </Text>
           <Text style={styles.text}>
             📐 Medição AR: {evaluationData.tasks.medicaoAR?.completed && evaluationData.tasks.medicaoAR.arData?.distanceMeters
               ? `✓ ${evaluationData.tasks.medicaoAR.arData.distanceMeters.toFixed(2)} m`
               : 'Pendente'}
           </Text>
+          {evaluationData.tasks.medicaoAR?.completed && evaluationData.tasks.medicaoAR.arData?.distanceRaw && (
+            <Text style={[styles.text, { marginLeft: 16, fontSize: 13, color: '#94a3b8' }]}>
+              ➔ Medição linear: {evaluationData.tasks.medicaoAR.arData.distanceRaw.toFixed(2)} m (+12% de margem)
+            </Text>
+          )}
+          {evaluationData.tasks.medicaoAR?.completed && evaluationData.tasks.medicaoAR.arData?.infraestrutura && (
+            <Text style={[styles.text, { marginLeft: 16, fontSize: 13, color: '#38bdf8' }]}>
+              ➔ Passagem: {evaluationData.tasks.medicaoAR.arData.infraestrutura.tipo === 'conduite' ? '📁 Conduíte' : evaluationData.tasks.medicaoAR.arData.infraestrutura.tipo === 'aparente' ? '🏢 Aparente' : '☁️ Forro/Gesso'} ({evaluationData.tasks.medicaoAR.arData.infraestrutura.detalhe})
+            </Text>
+          )}
           <Text style={styles.text}>
             📦 Simulação Cubo: {evaluationData.tasks.cuboAR?.completed ? '✓ Coordenadas registradas' : 'Pendente'}
           </Text>
+          {evaluationData.tasks.cuboAR?.completed && (
+            <Text style={[styles.text, { marginLeft: 16, fontSize: 13, color: '#4ade80' }]}>
+              ➔ Tomada a menos de 1m: {evaluationData.tasks.cuboAR.arData.temTomadaProxima ? `✓ Sim (${evaluationData.tasks.cuboAR.arData.voltagemTomada})` : '✗ Não'}
+            </Text>
+          )}
           <Text style={styles.text}>
             🎥 Vídeo da Rota: {evaluationData.tasks.videoRota?.completed ? '✓ Salvo na Galeria' : 'Pendente'}
+          </Text>
+          <Text style={styles.text}>
+            ⚡ Quadro principal: {evaluationData.tasks.fotoQuadroEnergia?.completed 
+              ? (evaluationData.tasks.fotoQuadroEnergia.mediaUri === 'nao_se_aplica' ? '🚫 Não se aplica / Inacessível' : '✓ Quadro registrado') 
+              : 'Pendente'}
+          </Text>
+          <Text style={styles.text}>
+            🔌 Tomada aproximada: {evaluationData.tasks.fotoTomadaAproximada?.completed ? '✓ Tomada registrada' : 'Pendente'}
+          </Text>
+          <Text style={styles.text}>
+            🔌 Entrada de internet: {evaluationData.tasks.fotoEntradaInternet?.completed 
+              ? (evaluationData.tasks.fotoEntradaInternet.mediaUri === 'nao_se_aplica' ? '🚫 Não se aplica / Inacessível' : '✓ Entrada registrada') 
+              : 'Pendente'}
+          </Text>
+          <Text style={styles.text}>
+            🌳 Passagem externa: {evaluationData.tasks.fotoTrechoExterno?.completed 
+              ? (evaluationData.tasks.fotoTrechoExterno.mediaUri === 'nao_se_aplica' ? '🚫 Não se aplica / Apenas interno' : '✓ Passagem externa registrada') 
+              : 'Pendente'}
+          </Text>
+          <Text style={styles.text}>
+            🧱 Furações de parede: {evaluationData.tasks.fotoObstaculosFuro?.completed 
+              ? (evaluationData.tasks.fotoObstaculosFuro.mediaUri === 'nao_se_aplica' 
+                  ? '🚫 Não se aplica / Sem furos' 
+                  : (Array.isArray(evaluationData.tasks.fotoObstaculosFuro.mediaUri)
+                      ? `✓ ${evaluationData.tasks.fotoObstaculosFuro.mediaUri.length} furações registradas`
+                      : '✓ Furações registradas')) 
+              : 'Pendente'}
           </Text>
         </View>
 
         {/* Grau de Complexidade da Instalação */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Grau de Complexidade</Text>
-          <Text style={styles.sectionSubtitle}>Informe a dificuldade estimada da instalação</Text>
+          <Text style={styles.sectionTitle}>Viabilidade do Traçado (Cabo)</Text>
+          <Text style={styles.sectionSubtitle}>Como você avalia a viabilidade física de passagem do cabo de rede?</Text>
 
-          <View style={styles.complexityContainer}>
-            {['baixo', 'medio', 'alto'].map((lvl) => {
-              const label = lvl === 'baixo' ? 'Baixo' : lvl === 'medio' ? 'Médio' : 'Alto';
+          <View style={styles.complexityVerticalContainer}>
+            {['baixo', 'medio', 'alto', 'nao_sei'].map((lvl) => {
+              const label = lvl === 'baixo' ? 'Fácil (Trajeto linear sem desvios)' : 
+                            lvl === 'medio' ? 'Normal (Com algumas curvas ou paredes)' : 
+                            lvl === 'alto' ? 'Difícil (Passagem por lajes ou andares)' : 
+                            'Não sei informar (O NOC avaliará)';
               const isSelected = complexidade === lvl;
               return (
                 <TouchableOpacity
                   key={lvl}
                   style={[
-                    styles.complexityBtn,
-                    isSelected && styles.complexityBtnSelected
+                    styles.complexityVerticalBtn,
+                    isSelected && styles.complexityVerticalBtnSelected
                   ]}
-                  onPress={() => setComplexidade(lvl)}
+                  onPress={() => updateSummaryData({ complexidade: lvl })}
                 >
+                  <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
+                    {isSelected && <View style={styles.radioInnerCircle} />}
+                  </View>
                   <Text style={[
-                    styles.complexityBtnText,
-                    isSelected && styles.complexityBtnTextSelected
+                    styles.complexityVerticalText,
+                    isSelected && styles.complexityVerticalTextSelected
                   ]}>
                     {label}
                   </Text>
@@ -276,16 +385,16 @@ export default function SummaryScreen({ navigation }) {
 
         {/* Categorias Desejadas de Roteador */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Categorias de Roteador</Text>
-          <Text style={styles.sectionSubtitle}>Marque os tipos de equipamentos sugeridos</Text>
+          <Text style={styles.sectionTitle}>Perfil de Uso e Requisitos Wi-Fi</Text>
+          <Text style={styles.sectionSubtitle}>Selecione as necessidades de conectividade do local:</Text>
 
           <View style={styles.categoryList}>
             {[
-              { id: 'barato', label: 'Baratos / Entrada' },
-              { id: 'custo_beneficio', label: 'Custo-Benefício' },
-              { id: 'high_tech', label: 'High-Tech / Alta Performance' },
-              { id: 'mesh', label: 'Mesh / Cobertura Total' },
-              { id: 'corporativo', label: 'Corporativo / Alta Densidade' }
+              { id: 'barato', label: '📱 Uso geral (estudos, redes sociais e navegação básica)' },
+              { id: 'custo_beneficio', label: '💻 Trabalho remoto (Home Office) ou Streaming HD' },
+              { id: 'high_tech', label: '🎮 Jogos online e Streaming em Altíssima Definição (4K)' },
+              { id: 'mesh', label: '📶 Cobertura ampla (múltiplos cômodos / casa grande)' },
+              { id: 'corporativo', label: '❓ Não tenho certeza (Seleção automática do NOC)' }
             ].map((cat) => {
               const isSelected = categoriasSelected.includes(cat.id);
               return (
@@ -314,16 +423,17 @@ export default function SummaryScreen({ navigation }) {
             title="Enviar para análise"
             onPress={handleSend}
             loading={isSending}
+            disabled={isSending || !complexidade || categoriasSelected.length === 0}
           />
           <Button
-            title="Assistente (chat n8n)"
+            title="Falar com Assistente Virtual"
             type="secondary"
             onPress={() => navigation.navigate('Chat')}
             disabled={isSending}
           />
           {/* Botão para refazer/visualizar a simulação do cubo 3D */}
           <Button
-            title="Simular roteador em AR"
+            title="Simular Roteador 3D (AR)"
             type="secondary"
             onPress={() => navigation.navigate('ARScreen', { taskKey: 'cuboAR' })}
             disabled={isSending}
@@ -403,32 +513,50 @@ const styles = StyleSheet.create({
   footer: {
     marginTop: 'auto',
   },
-  complexityContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  complexityVerticalContainer: {
     marginTop: 8,
+    gap: 8,
   },
-  complexityBtn: {
-    flex: 1,
+  complexityVerticalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#1E293B',
+    padding: 14,
+    borderRadius: 8,
     borderWidth: 1.5,
     borderColor: '#334155',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 4,
   },
-  complexityBtnSelected: {
+  complexityVerticalBtnSelected: {
     borderColor: COLORS.primary,
     backgroundColor: 'rgba(43, 180, 214, 0.15)',
   },
-  complexityBtnText: {
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: COLORS.textSecondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  radioCircleSelected: {
+    borderColor: COLORS.primary,
+  },
+  radioInnerCircle: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.primary,
+  },
+  complexityVerticalText: {
     color: COLORS.textSecondary,
     fontSize: 14,
-    fontWeight: 'bold',
+    flex: 1,
   },
-  complexityBtnTextSelected: {
-    color: COLORS.primary,
+  complexityVerticalTextSelected: {
+    color: COLORS.text,
+    fontWeight: 'bold',
   },
   categoryList: {
     marginTop: 8,
@@ -469,6 +597,7 @@ const styles = StyleSheet.create({
   categoryLabel: {
     color: COLORS.textSecondary,
     fontSize: 14,
+    flex: 1,
   },
   categoryLabelSelected: {
     color: COLORS.text,

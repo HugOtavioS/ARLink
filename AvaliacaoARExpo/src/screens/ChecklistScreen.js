@@ -6,30 +6,70 @@ import { COLORS } from '../config/colors';
 
 const TASKS_INFO = {
   fotoGeral: { 
-    title: 'Ponto de energia', 
-    desc: 'Registrar proximidade de tomada para o equipamento',
-    buttonText: '📸 Registrar foto',
+    title: 'Foto Geral do Ambiente (Instalação)', 
+    desc: 'Registre uma foto panorâmica do local selecionado para a instalação física do roteador',
+    buttonText: '📸 Foto Geral do Ambiente',
     action: 'camera',
     isVideo: false
   },
   medicaoAR: { 
-    title: 'Espaço para equipamento', 
-    desc: 'Medir e registrar o espaço disponível para o modem/roteador',
-    buttonText: '📐 Medir com AR',
+    title: 'Medição do Trajeto (Cabo UTP)', 
+    desc: 'Utilize a câmera para mapear e medir o trajeto físico por onde passará o cabo de rede UTP',
+    buttonText: '📐 Medir Trajeto com AR',
     action: 'ar'
   },
   videoRota: { 
-    title: 'Cobertura do local', 
-    desc: 'Gravar um vídeo curto mostrando o ambiente para análise de sinal',
-    buttonText: '🎬 Gravar vídeo',
+    title: 'Vídeo do Trajeto Mapeado', 
+    desc: 'Grave um vídeo contínuo percorrendo a rota traçada para análise física de viabilidade',
+    buttonText: '🎬 Gravar Vídeo do Trajeto',
     action: 'camera',
     isVideo: true
   },
   cuboAR: { 
-    title: 'Simulação 3D', 
-    desc: 'Testar se o modem físico cabe no local desejado',
-    buttonText: '📦 Simular roteador',
+    title: 'Simulação de Equipamento 3D', 
+    desc: 'Posicione virtualmente o modelo 3D do roteador na parede ou móvel para simular a instalação final',
+    buttonText: '📦 Simular Roteador 3D',
     action: 'ar'
+  },
+  fotoQuadroEnergia: { 
+    title: 'Foto do Quadro de Energia / Telecom', 
+    desc: 'Registre uma foto nítida do quadro de força geral ou da caixa de distribuição de telecomunicações',
+    buttonText: '📸 Foto do Quadro Técnico',
+    action: 'camera',
+    isVideo: false,
+    allowEscape: true
+  },
+  fotoTomadaAproximada: { 
+    title: 'Foto da Tomada do Equipamento', 
+    desc: 'Registre uma foto em close da tomada elétrica que alimentará o roteador',
+    buttonText: '📸 Foto da Tomada Próxima',
+    action: 'camera',
+    isVideo: false
+  },
+  fotoEntradaInternet: { 
+    title: 'Foto do Ponto de Entrada da Internet', 
+    desc: 'Fotografe o local externo ou interno de onde o cabo de internet da rua chega na sua casa (ex: poste, caixa externa no muro ou fachada)',
+    buttonText: '📸 Foto do Ponto de Entrada',
+    action: 'camera',
+    isVideo: false,
+    allowEscape: true
+  },
+  fotoTrechoExterno: { 
+    title: 'Foto da Passagem Externa (Se houver)', 
+    desc: 'Tire uma foto da área externa caso alguma parte do cabo precise ficar exposta ao tempo (sol e chuva)',
+    buttonText: '📸 Foto da Área Externa',
+    action: 'camera',
+    isVideo: false,
+    allowEscape: true
+  },
+  fotoObstaculosFuro: { 
+    title: 'Foto de Paredes a Serem Furadas', 
+    desc: 'Fotografe as paredes ou divisórias que o cabo precisará atravessar de um cômodo para o outro',
+    buttonText: '📸 Foto de Paredes a Furar',
+    action: 'camera',
+    isVideo: false,
+    allowEscape: true,
+    isMultiple: true
   },
 };
 
@@ -57,7 +97,7 @@ export default function ChecklistScreen({ navigation }) {
 
   const handleAction = (key, info) => {
     if (info.action === 'camera') {
-      navigation.navigate('Camera', { taskKey: key, isVideo: info.isVideo });
+      navigation.navigate('Camera', { taskKey: key, isVideo: info.isVideo, isMultiple: info.isMultiple });
     } else if (info.action === 'ar') {
       navigation.navigate('ARScreen', { taskKey: key });
     }
@@ -81,21 +121,52 @@ export default function ChecklistScreen({ navigation }) {
             <View key={key} style={styles.taskCard}>
               <View style={styles.taskHeader}>
                 <Text style={styles.taskTitle}>{info.title}</Text>
-                <View style={[styles.checkbox, task.completed && styles.checkboxCompleted]}>
-                  {task.completed && <Text style={styles.checkmark}>✓</Text>}
+                <View style={[
+                  styles.checkbox,
+                  task.completed && (task.mediaUri === 'nao_se_aplica' ? styles.checkboxSkipped : styles.checkboxCompleted)
+                ]}>
+                  {task.completed && (
+                    <Text style={[styles.checkmark, task.mediaUri === 'nao_se_aplica' && { color: '#94a3b8' }]}>
+                      {task.mediaUri === 'nao_se_aplica' ? '—' : '✓'}
+                    </Text>
+                  )}
                 </View>
               </View>
               
               <Text style={styles.taskDesc}>{info.desc}</Text>
               
-              <TouchableOpacity 
-                style={[styles.actionButton, task.completed && styles.actionButtonCompleted]}
-                onPress={() => handleAction(key, info)}
-              >
-                <Text style={[styles.actionButtonText, task.completed && { color: '#4ade80' }]}>
-                  {task.completed ? '🔁 Refazer passo' : info.buttonText}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.buttonsContainer}>
+                <TouchableOpacity 
+                  style={[styles.actionButton, task.completed && task.mediaUri !== 'nao_se_aplica' && styles.actionButtonCompleted]}
+                  onPress={() => handleAction(key, info)}
+                >
+                  <Text style={[styles.actionButtonText, task.completed && task.mediaUri !== 'nao_se_aplica' && { color: '#4ade80' }]}>
+                    {task.completed 
+                      ? (task.mediaUri === 'nao_se_aplica' ? '📸 Tirar Foto' : '🔁 Refazer passo') 
+                      : info.buttonText}
+                  </Text>
+                </TouchableOpacity>
+
+                {info.allowEscape && (
+                  <TouchableOpacity 
+                    style={[
+                      styles.escapeButton,
+                      task.completed && task.mediaUri === 'nao_se_aplica' && styles.escapeButtonSelected
+                    ]}
+                    onPress={() => {
+                      if (task.completed && task.mediaUri === 'nao_se_aplica') {
+                        completeTask(key, { mediaUri: null, completed: false });
+                      } else {
+                        completeTask(key, { mediaUri: 'nao_se_aplica', completed: true });
+                      }
+                    }}
+                  >
+                    <Text style={styles.escapeButtonText}>
+                      {task.completed && task.mediaUri === 'nao_se_aplica' ? '✓ Dispensado' : '🚫 Não se aplica'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           );
         })}
@@ -180,6 +251,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
   },
+  checkboxSkipped: {
+    backgroundColor: 'rgba(148, 163, 184, 0.2)',
+    borderColor: '#64748b',
+  },
   checkmark: {
     color: '#000',
     fontSize: 14,
@@ -191,18 +266,43 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     lineHeight: 20,
   },
+  buttonsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 8,
+  },
   actionButton: {
     backgroundColor: 'rgba(43, 180, 214, 0.15)', // Fundo ciano bem transparente
-    alignSelf: 'flex-start',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionButtonCompleted: {
     backgroundColor: 'rgba(76, 175, 80, 0.15)', // Verde transparente
   },
   actionButtonText: {
     color: COLORS.primary,
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  escapeButton: {
+    backgroundColor: 'rgba(148, 163, 184, 0.12)', // Cinza azulado transparente
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  escapeButtonSelected: {
+    backgroundColor: 'rgba(148, 163, 184, 0.25)',
+    borderColor: '#64748b',
+    borderWidth: 1,
+  },
+  escapeButtonText: {
+    color: '#94a3b8',
     fontWeight: 'bold',
     fontSize: 14,
   },
