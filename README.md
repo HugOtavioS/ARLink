@@ -7,9 +7,9 @@ Sistema em que o próprio cliente (ou um técnico sem experiência) coleta, pelo
 Projeto Integrador da Faculdade SENAI Taubaté, desenvolvido em equipe para a provedora CTI.
 
 <!-- TODO: adicione 2 ou 3 prints ou um GIF em docs/img/ e descomente:
-| Medição em RA | Roteador 3D | Painel do NOC |
+| Medição em RA |
 |---|---|---|
-| ![medição](docs/img/medicao.png) | ![roteador](docs/img/roteador.png) | ![admin](docs/img/admin.png) |
+| ![medição](docs/img/ARLink.jpeg) |
 -->
 
 ---
