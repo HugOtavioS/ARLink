@@ -45,10 +45,10 @@
 
   // Configuração do Banco de Dados AWS RDS
   const dbConfig = {
-    host: 'database-2.ceklsazpveu2.us-east-1.rds.amazonaws.com',
-    user: 'admin',
-    password: 's3nh44wss',
-    database: 'app_instalacoes',
+    host: '',
+    user: '',
+    password: '',
+    database: '',
     port: 3306,
     waitForConnections: true,
     connectionLimit: 10,
